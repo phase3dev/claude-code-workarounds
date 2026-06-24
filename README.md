@@ -258,7 +258,7 @@ After patching, reload the webview (Command Palette -> "Developer: Reload Window
 
 ## Side note: launching Claude Code with third-party models
 
-Because Option 1 is a launcher you control, you can also use it to launch Claude Code with any third-party, Anthropic-API-compatible model, such as DeepSeek. Set model-routing variables in the same launcher environment:
+Because Option 1 is a launcher you control, you can also use it to launch Claude Code with any third-party, Anthropic-API-compatible model, such as DeepSeek or GLM. Set model-routing variables in the same launcher environment:
 
 ```sh
 # --- Connection ---
@@ -271,6 +271,25 @@ export ANTHROPIC_DEFAULT_SONNET_MODEL="deepseek-v4-pro"
 export ANTHROPIC_DEFAULT_HAIKU_MODEL="deepseek-v4-flash"
 export CLAUDE_CODE_SUBAGENT_MODEL="deepseek-v4-flash"
 ```
+
+For GLM 5.2, point the connection at z.ai and map every model to `glm-5.2`:
+
+```sh
+# --- Connection ---
+export ANTHROPIC_BASE_URL="https://api.z.ai/api/anthropic"
+export ANTHROPIC_AUTH_TOKEN="your token"
+# --- Model mapping ---
+export ANTHROPIC_MODEL="glm-5.2"
+export ANTHROPIC_DEFAULT_OPUS_MODEL="glm-5.2"
+export ANTHROPIC_DEFAULT_SONNET_MODEL="glm-5.2"
+export ANTHROPIC_DEFAULT_HAIKU_MODEL="glm-5.2"
+export CLAUDE_CODE_SUBAGENT_MODEL="glm-5.2"
+```
+
+For examples of the launcher with GLM 5.2 enabled, see these two Gists:
+
+* <https://gist.github.com/phase3dev/b7c341d63f666479be0aff847a5bd018> - a simplified version of the current launcher containing only the GLM 5.2 launch code and related environment variables.
+* <https://gist.github.com/phase3dev/1f7ee1cb17151c19d538e053f4f548ca> - the full current launcher from the repo with all features enabled and GLM 5.2 active.
 
 Setup is otherwise identical to Option 1. This is unrelated to the fixes above.
 
