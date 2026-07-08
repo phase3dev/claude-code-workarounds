@@ -11,7 +11,8 @@ the one lever that is not interactivity-gated. It edits no files.
 > experiment (an `x-cc-atis` request header sourced from a cached assignment in
 > `~/.claude.json`) blanks summaries even when the request carries
 > `display: "summarized"`, so this fix cannot restore them there. Other models
-> and un-enrolled installs are unaffected. Diagnosis and mitigation:
+> and un-enrolled installs are unaffected. Diagnosis and mitigation (manual, or
+> automated by the launcher's opt-in `CC_ATIS_OPTOUT=1` toggle, off by default):
 > [README 2026-07-07 update](../../README.md#2026-07-07-update-opus-48-and-the-experiment-header);
 > mechanism: [TECHNICAL.md](../../TECHNICAL.md#2026-07-07-update-server-side-experiment-blanks-opus-48-summaries).
 > Also note extension `2.1.202`+ maps `showThinkingSummaries` into the launch

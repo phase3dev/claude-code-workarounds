@@ -9,7 +9,8 @@ recompiling. The Windows launcher compiles to a single `claudemax.exe` with
 
 Both launchers are drop-in process wrappers: they find the real `claude`, peel
 the process-wrapper convention args, inject the thinking-display flag when a real
-agent run is detected, reconcile the webview bundle, then exec the real CLI.
+agent run is detected, apply the opt-in `x-cc-atis` experiment opt-out,
+reconcile the webview bundle, then exec the real CLI.
 
 ## Wiring (process wrapper)
 
@@ -38,6 +39,7 @@ Terminal:
 | `CC_THINKING_DISPLAY` | `summarized` | `summarized` shows extended-thinking summaries; `omitted` hides them (no injection). **2026-07-07:** cannot override the server-side experiment that blanks Opus 4.8 summaries - see the [README 2026-07-07 update](../README.md#2026-07-07-update-opus-48-and-the-experiment-header). |
 | `CC_PATCH_CONTEXT_ICON` | `1` | `0` leaves the context-usage icon unpatched (and reverts ours on the next launch). |
 | `CC_PATCH_MD_COPY` | `1` | `0` leaves the webview without the markdown copy/export controls (and reverts ours on the next launch). |
+| `CC_ATIS_OPTOUT` | `0` | `1` opts out of the server-side experiment that blanks Opus 4.8 thinking summaries: purges the cached `x-cc-atis` assignment from `~/.claude.json` (one-time backup, atomic write, idempotent) and launches with `DISABLE_GROWTHBOOK=1`. **Off by default** - it edits the CLI's config file and disables ALL client-side feature gating. Bash launcher needs `jq` for the purge half. See the [README 2026-07-07 update](../README.md#2026-07-07-update-opus-48-and-the-experiment-header). |
 
 Setting toggles without touching the script:
 

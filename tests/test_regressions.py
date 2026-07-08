@@ -3,6 +3,7 @@ import importlib.util
 import json
 import os
 import pathlib
+import shutil
 import stat
 import subprocess
 import sys
@@ -291,6 +292,150 @@ class LauncherRegressionTests(unittest.TestCase):
                 json.loads(capture.read_text(encoding="utf-8")),
                 {k: None for k in keys},
             )
+
+    # CC_ATIS_OPTOUT purges the cached x-cc-atis experiment assignment from the
+    # CLI config and sets DISABLE_GROWTHBOOK=1 for the launched process (the
+    # 2026-07-07 Opus 4.8 mitigation). Default off: config untouched, env unset.
+    @staticmethod
+    def _atis_config():
+        return {
+            "someSetting": True,
+            "clientDataCacheSlots": {
+                "slot-a": {
+                    "data": {
+                        "experimentKey": "claude_code_attic_parcel_experiment",
+                        "atis": "attic-parcel-meridian",
+                    },
+                    "at": 1783487538925,
+                },
+                "slot-b": {"data": {"other": "keep-me"}, "at": 1},
+            },
+            "clientDataCache": {"atis": "attic-parcel-meridian", "other": "keep-me"},
+        }
+
+    def _assert_atis_purged(self, cfg):
+        data = json.loads(cfg.read_text(encoding="utf-8"))
+        self.assertEqual(data["someSetting"], True)
+        self.assertEqual(
+            data["clientDataCacheSlots"],
+            {"slot-b": {"data": {"other": "keep-me"}, "at": 1}},
+        )
+        self.assertEqual(data["clientDataCache"], {"other": "keep-me"})
+
+    @unittest.skipIf(os.name == "nt", "POSIX Bash launcher test")
+    @unittest.skipIf(shutil.which("jq") is None, "jq required for the purge half")
+    def test_bash_launcher_purges_atis_assignment_only_when_enabled(self):
+        with tempfile.TemporaryDirectory() as td:
+            fake = pathlib.Path(td) / "claude"
+            capture = pathlib.Path(td) / "env.json"
+            fake.write_text(
+                "#!/usr/bin/env bash\n"
+                "python3 - <<'PY'\n"
+                "import json, os\n"
+                "open(os.environ['CAPTURE_ENV'], 'w').write(\n"
+                "    json.dumps({'DISABLE_GROWTHBOOK': os.environ.get('DISABLE_GROWTHBOOK')}))\n"
+                "PY\n",
+                encoding="utf-8",
+            )
+            fake.chmod(fake.stat().st_mode | stat.S_IXUSR)
+
+            cfg = pathlib.Path(td) / ".claude.json"
+            original = json.dumps(self._atis_config())
+            cfg.write_text(original, encoding="utf-8")
+            backup = pathlib.Path(str(cfg) + ".bak-cc-workarounds")
+            base = {
+                "HOME": td,            # the launcher purges $HOME/.claude.json
+                "CC_RECONCILE": "0",   # do not read or write any bundle this launch
+                "CLAUDE_REAL_BIN": str(fake),
+                "CAPTURE_ENV": str(capture),
+                # Pinned so a host env that already exports DISABLE_GROWTHBOOK
+                # (e.g. this mitigation applied locally) cannot skew the test.
+                "DISABLE_GROWTHBOOK": "",
+            }
+            launcher = str(REPO / "launcher" / "claudemax")
+
+            # Default off: config byte-identical, no backup, env var not set.
+            res = run([launcher], env=base)
+            self.assertEqual(res.returncode, 0, res.stderr)
+            self.assertEqual(cfg.read_text(encoding="utf-8"), original)
+            self.assertFalse(backup.exists())
+            self.assertEqual(
+                json.loads(capture.read_text(encoding="utf-8")),
+                {"DISABLE_GROWTHBOOK": ""},
+            )
+
+            # Enabled: atis slots + cache key purged, everything else kept, the
+            # pristine config backed up once, DISABLE_GROWTHBOOK exported.
+            res = run([launcher], env={**base, "CC_ATIS_OPTOUT": "1"})
+            self.assertEqual(res.returncode, 0, res.stderr)
+            self._assert_atis_purged(cfg)
+            self.assertEqual(backup.read_text(encoding="utf-8"), original)
+            self.assertEqual(
+                json.loads(capture.read_text(encoding="utf-8")),
+                {"DISABLE_GROWTHBOOK": "1"},
+            )
+
+            # Idempotent: a second enabled run does not rewrite the purged file.
+            before = cfg.stat().st_mtime_ns
+            res = run([launcher], env={**base, "CC_ATIS_OPTOUT": "1"})
+            self.assertEqual(res.returncode, 0, res.stderr)
+            self.assertEqual(cfg.stat().st_mtime_ns, before)
+            self._assert_atis_purged(cfg)
+
+    def test_windows_launcher_purges_atis_assignment_only_when_enabled(self):
+        with tempfile.TemporaryDirectory() as td:
+            temp = pathlib.Path(td)
+            capture = temp / "env.json"
+            cli = temp / "cli.js"
+            cli.write_text(
+                "const fs = require('fs');\n"
+                "fs.writeFileSync(process.env.CAPTURE_ENV, JSON.stringify({\n"
+                "  DISABLE_GROWTHBOOK: ('DISABLE_GROWTHBOOK' in process.env)\n"
+                "    ? process.env.DISABLE_GROWTHBOOK : null,\n"
+                "}));\n",
+                encoding="utf-8",
+            )
+            shim = make_fake_cmd_shim(td, cli)
+
+            cfg = temp / ".claude.json"
+            original = json.dumps(self._atis_config())
+            cfg.write_text(original, encoding="utf-8")
+            backup = pathlib.Path(str(cfg) + ".bak-cc-workarounds")
+            base = {
+                "HOME": td,
+                "USERPROFILE": td,
+                "CC_RECONCILE": "0",
+                "CLAUDE_REAL_BIN": str(shim),
+                "CAPTURE_ENV": str(capture),
+                # Pinned so a host env that already exports DISABLE_GROWTHBOOK
+                # (e.g. this mitigation applied locally) cannot skew the test.
+                "DISABLE_GROWTHBOOK": "",
+            }
+            launcher = str(REPO / "launcher" / "claudemax.win.js")
+
+            res = run(["node", launcher], env=base)
+            self.assertEqual(res.returncode, 0, res.stderr)
+            self.assertEqual(cfg.read_text(encoding="utf-8"), original)
+            self.assertFalse(backup.exists())
+            self.assertEqual(
+                json.loads(capture.read_text(encoding="utf-8")),
+                {"DISABLE_GROWTHBOOK": ""},
+            )
+
+            res = run(["node", launcher], env={**base, "CC_ATIS_OPTOUT": "1"})
+            self.assertEqual(res.returncode, 0, res.stderr)
+            self._assert_atis_purged(cfg)
+            self.assertEqual(backup.read_text(encoding="utf-8"), original)
+            self.assertEqual(
+                json.loads(capture.read_text(encoding="utf-8")),
+                {"DISABLE_GROWTHBOOK": "1"},
+            )
+
+            before = cfg.stat().st_mtime_ns
+            res = run(["node", launcher], env={**base, "CC_ATIS_OPTOUT": "1"})
+            self.assertEqual(res.returncode, 0, res.stderr)
+            self.assertEqual(cfg.stat().st_mtime_ns, before)
+            self._assert_atis_purged(cfg)
 
     def test_launchers_expose_local_env_injection_anchor(self):
         # The marker pair is a stable contract: the Linux deploy step and the

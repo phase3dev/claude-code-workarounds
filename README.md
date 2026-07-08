@@ -15,7 +15,8 @@ Not affiliated with or endorsed by Anthropic. A future Claude Code update could 
    > request correctly asks for one, so the launcher's flag is no longer sufficient
    > on that single model. It is gated on an experiment-assignment header the CLI
    > sends. Every other model is unaffected and the launcher remains the fix for
-   > them. There is a mitigation.
+   > them. There is a mitigation, and the launcher can now apply it for you:
+   > set `CC_ATIS_OPTOUT=1` (off by default - it has caveats).
    > -> [2026-07-07 update](#2026-07-07-update-opus-48-and-the-experiment-header)
 
    <img alt="A populated Thinking summary in the VS Code chat instead of an empty block" src="media/thinking.png" style="max-width: 100%; height: auto;">
@@ -59,6 +60,7 @@ Toggles (set in the environment where Claude Code launches, then reload):
 | `CC_THINKING_DISPLAY` | `summarized` | `summarized` shows extended-thinking summaries; `omitted` hides them (no injection). |
 | `CC_PATCH_CONTEXT_ICON` | `1` | `0` leaves the context-usage icon unpatched (and reverts ours on the next launch). |
 | `CC_PATCH_MD_COPY` | `1` | `0` leaves the webview without the markdown copy/export controls (and reverts ours on the next launch). |
+| `CC_ATIS_OPTOUT` | `0` | `1` opts out of the server-side experiment that blanks Opus 4.8 thinking summaries: purges the cached `x-cc-atis` assignment from `~/.claude.json` (one-time backup, atomic write, idempotent) and launches with `DISABLE_GROWTHBOOK=1`. **Off by default** - it edits the CLI's config file and disables ALL client-side feature gating; see the [2026-07-07 update](#2026-07-07-update-opus-48-and-the-experiment-header). |
 
 See [`launcher/README.md`](launcher/README.md) for wiring details, the VS Code env-setting how-to, and the build command.
 
@@ -172,6 +174,22 @@ install out of Claude Code's client-side feature gating entirely (no other side
 effects observed so far, but they are possible); on Windows the file is
 `%USERPROFILE%\.claude.json` - if `jq` is unavailable, hand-edit the slot
 entries containing `"atis"` out of `clientDataCacheSlots`.
+
+**Launcher automation (added 2026-07-07).** The launcher can apply both steps
+on every launch: set `CC_ATIS_OPTOUT=1` in the launcher's environment (e.g. VS
+Code's `claudeCode.environmentVariables`, or your shell profile). When enabled
+it purges any cached assignment (idempotent - no rewrite when nothing is
+cached; one-time backup to `~/.claude.json.bak-cc-workarounds`; atomic
+temp-then-rename write; best-effort, never blocks the launch) and sets
+`DISABLE_GROWTHBOOK=1` for the launched process, so a refresh that re-enrolls
+you between launches is undone on the next launch. It is **off by default**,
+unlike the launcher's other fixes, because it is not free: it edits the CLI's
+own config file, and the env var disables Claude Code's client-side feature
+gating entirely, not just this experiment - enable it deliberately. The bash
+launcher needs `jq` for the purge half (without it, it warns and only sets the
+env var, which is NOT sufficient while an assignment is already cached); the
+Windows launcher has no external dependency. The manual recipe above remains
+for non-launcher users.
 
 **Status.** Undocumented upstream: no CHANGELOG entry through `2.1.204`
 mentions it, and there was no notice, no opt-in, and no documented opt-out. The
@@ -388,7 +406,7 @@ Setup is otherwise identical to Option 1. This is unrelated to the fixes above.
 
 ## Troubleshooting
 
-* Summaries suddenly empty again, but only on Opus 4.8 (since 2026-07-07): the launcher is not broken and neither is your setup - your install is likely enrolled in a server-side experiment that blanks Opus 4.8 summaries at the API. No launch flag can override it. Diagnose and mitigate per the [2026-07-07 update](#2026-07-07-update-opus-48-and-the-experiment-header).
+* Summaries suddenly empty again, but only on Opus 4.8 (since 2026-07-07): the launcher is not broken and neither is your setup - your install is likely enrolled in a server-side experiment that blanks Opus 4.8 summaries at the API. No launch flag can override it. Diagnose and mitigate per the [2026-07-07 update](#2026-07-07-update-opus-48-and-the-experiment-header), or set `CC_ATIS_OPTOUT=1` in the launcher environment to apply the mitigation automatically (off by default; read the caveats there first).
 * Thinking still empty after setup: Reload the VS Code window after changing the setting. Confirm the setting points to the launcher's full absolute path. On Windows, confirm the path uses double backslashes.
 * Context icon still missing after setup: It may take two reloads the first time (see the first-run note above). Confirm `CC_PATCH_CONTEXT_ICON` is not set to `0` and `CC_WORKAROUNDS` is not set to `0`.
 * `could not find the real 'claude' binary`: Set `CLAUDE_REAL_BIN` to its full path. Use `which claude` on Linux/macOS or `where claude` on Windows.

@@ -7,7 +7,9 @@
 //      the launch args (the one lever that is NOT interactivity-gated). Edits
 //      nothing.
 //      2026-07-07: cannot override the server-side experiment that blanks Opus
-//      4.8 summaries (x-cc-atis header); see the README's 2026-07-07 update.
+//      4.8 summaries (x-cc-atis header); see the README's 2026-07-07 update. The
+//      launcher can apply that update's mitigation - opt in with CC_ATIS_OPTOUT=1
+//      (OFF by default; see the section below and the README for its caveats).
 //   2. Restores the always-visible context-usage icon in the VS Code chat input.
 //      Recent extension builds (2.1.165+) hide that icon until you have used
 //      >50% of the context window; with the 1M window that is ~500k tokens, so it
@@ -50,6 +52,8 @@
 //   set CC_WORKAROUNDS=0               master: disable every fix (default: 1)
 //   set CC_RECONCILE=0                 do not touch the webview bundle (default: 1)
 //   set CC_SCRUB_ROUTING=1             force the default Anthropic account (default: 0)
+//   set CC_ATIS_OPTOUT=1               purge cached x-cc-atis experiment assignment
+//                                      + DISABLE_GROWTHBOOK=1 (default: 0)
 //
 // The real `claude` must be installed. This wrapper finds it automatically
 // (native install `claude.exe` or npm `claude.cmd`); if it cannot, set the
@@ -549,6 +553,86 @@ if (process.env.CC_SCRUB_ROUTING && process.env.CC_SCRUB_ROUTING !== "0") {
 //   if (!process.env.CLAUDE_CODE_EFFORT_LEVEL) process.env.CLAUDE_CODE_EFFORT_LEVEL = "max";
 // >>> ccwa-local-env >>>
 // <<< ccwa-local-env <<<
+
+// --- x-cc-atis experiment opt-out (OFF by default) ---------------------------
+// CC_ATIS_OPTOUT=1 applies the verified 2026-07-07 mitigation for the
+// server-side experiment that blanks Opus 4.8 thinking summaries (README
+// "2026-07-07 update"): purge any cached x-cc-atis experiment assignment from
+// the CLI config (%USERPROFILE%\.claude.json) and launch with
+// DISABLE_GROWTHBOOK=1 so the next remote feature refresh cannot re-enroll this
+// install. Both halves are required - the env var alone still sends the
+// already-cached token, and the purge alone lasts only until the next refresh
+// (both measured).
+//
+// OFF by default, unlike the other fixes, because it is not free: it edits the
+// CLI's own config file, and DISABLE_GROWTHBOOK=1 opts the install out of
+// Claude Code's client-side feature gating ENTIRELY, not just this experiment.
+// Enable it deliberately.
+//
+// Safety model matches the bundle patches: idempotent (no rewrite when nothing
+// is cached), one-time backup (.claude.json.bak-cc-workarounds, only if
+// absent), temp + rename write (a failed parse or write leaves the original
+// untouched), best-effort (never blocks the launch).
+function atisOptout() {
+  try {
+    if (process.env.CC_WORKAROUNDS === "0") return;
+    if (!process.env.CC_ATIS_OPTOUT || process.env.CC_ATIS_OPTOUT === "0") return;
+    process.env.DISABLE_GROWTHBOOK = "1";
+    const home = process.env.USERPROFILE || process.env.HOME || "";
+    if (!home) return;
+    const cfg = path.join(home, ".claude.json");
+    if (!fs.existsSync(cfg)) return;
+    let data;
+    try {
+      data = JSON.parse(fs.readFileSync(cfg, "utf8"));
+    } catch (_) {
+      return; // unreadable or malformed -> leave the file intact
+    }
+    if (!data || typeof data !== "object" || Array.isArray(data)) return;
+    let changed = false;
+    const slots = data.clientDataCacheSlots;
+    if (slots && typeof slots === "object" && !Array.isArray(slots)) {
+      for (const k of Object.keys(slots)) {
+        const v = slots[k];
+        if (v && v.data && typeof v.data === "object" && v.data.atis != null) {
+          delete slots[k];
+          changed = true;
+        }
+      }
+    }
+    if (
+      data.clientDataCache &&
+      typeof data.clientDataCache === "object" &&
+      "atis" in data.clientDataCache
+    ) {
+      delete data.clientDataCache.atis;
+      changed = true;
+    }
+    if (!changed) return; // idempotent: nothing of the experiment's is cached
+    const bak = cfg + ".bak-cc-workarounds";
+    if (!fs.existsSync(bak)) {
+      try {
+        fs.copyFileSync(cfg, bak);
+      } catch (_) {
+        /* best-effort backup */
+      }
+    }
+    const tmp = cfg + ".ccatis." + process.pid;
+    try {
+      fs.writeFileSync(tmp, JSON.stringify(data, null, 2) + "\n");
+      fs.renameSync(tmp, cfg); // atomic on the same volume
+    } catch (_) {
+      try {
+        fs.unlinkSync(tmp);
+      } catch (_) {
+        /* nothing to clean up */
+      }
+    }
+  } catch (_) {
+    /* never block the launch */
+  }
+}
+atisOptout();
 
 // --- Inject the thinking-display fix into the launch args -------------------
 // Fire on a real agent invocation. Surfaces signal a real run differently:

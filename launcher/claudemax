@@ -6,7 +6,9 @@
 #      headless -p/SDK. Done by injecting `--thinking-display summarized` into the
 #      launch args - the one lever that is NOT interactivity-gated. Edits nothing.
 #      2026-07-07: cannot override the server-side experiment that blanks Opus 4.8
-#      summaries (x-cc-atis header); see the README's 2026-07-07 update.
+#      summaries (x-cc-atis header); see the README's 2026-07-07 update. The
+#      launcher can apply that update's mitigation - opt in with CC_ATIS_OPTOUT=1
+#      (OFF by default; see the section below and the README for its caveats).
 #   2. Restores the always-visible context-usage icon in the VS Code chat input.
 #      Recent extension builds (2.1.165+) hide that icon until you have used
 #      >50% of the context window; with the 1M window that is ~500k tokens, so it
@@ -49,6 +51,8 @@
 #   export CC_WORKAROUNDS=0                 # master: disable every fix         (1)
 #   export CC_RECONCILE=0                   # do not touch the webview bundle   (1)
 #   export CC_SCRUB_ROUTING=1               # force the default Anthropic account (0)
+#   export CC_ATIS_OPTOUT=1                 # purge cached x-cc-atis experiment
+#                                           # assignment + DISABLE_GROWTHBOOK=1 (0)
 #
 # The real `claude` must be installed. This wrapper finds it automatically; if it
 # cannot, set CLAUDE_REAL_BIN to the full path of your real claude binary.
@@ -175,6 +179,59 @@ fi
 # and, coming after the scrub above, wins over it.
 # >>> ccwa-local-env >>>
 # <<< ccwa-local-env <<<
+
+# --- x-cc-atis experiment opt-out (OFF by default) ---------------------------
+#
+# CC_ATIS_OPTOUT=1 applies the verified 2026-07-07 mitigation for the
+# server-side experiment that blanks Opus 4.8 thinking summaries (README
+# "2026-07-07 update"):
+#   1. purge any cached x-cc-atis experiment assignment from ~/.claude.json, and
+#   2. launch with DISABLE_GROWTHBOOK=1 so the next remote feature refresh
+#      cannot re-enroll this install.
+# Both halves are required - the env var alone still sends the already-cached
+# token, and the purge alone lasts only until the next refresh (both measured).
+#
+# OFF by default, unlike the other fixes, because it is not free: it edits the
+# CLI's own config file, and DISABLE_GROWTHBOOK=1 opts the install out of Claude
+# Code's client-side feature gating ENTIRELY, not just this experiment. Enable
+# it deliberately.
+#
+# Safety model matches the bundle patches: idempotent (no rewrite when nothing
+# is cached), one-time backup (~/.claude.json.bak-cc-workarounds, only if
+# absent), atomic temp+mv write (jq exits non-zero on malformed input, so a bad
+# parse never replaces the file), best-effort (never blocks the launch). The
+# purge half needs jq; without it the launcher warns and still sets
+# DISABLE_GROWTHBOOK=1 (an already-cached assignment is still sent until purged
+# by hand - see the README's manual recipe).
+CC_ATIS_OPTOUT="${CC_ATIS_OPTOUT:-0}"
+
+_cc_atis_optout() {
+  [ "$CC_WORKAROUNDS" != "0" ] || return 0
+  [ "$CC_ATIS_OPTOUT" != "0" ] || return 0
+  export DISABLE_GROWTHBOOK=1
+  local cfg="$HOME/.claude.json" tmp
+  [ -f "$cfg" ] && [ -r "$cfg" ] || return 0
+  if ! command -v jq >/dev/null 2>&1; then
+    echo "claudemax: CC_ATIS_OPTOUT=1 but jq is not installed; cached x-cc-atis assignment (if any) NOT purged" >&2
+    return 0
+  fi
+  # Idempotent: rewrite only when an assignment is actually cached.
+  jq -e '((.clientDataCacheSlots // {}) | any(.[]?; .data.atis? != null))
+         or ((.clientDataCache // {}) | has("atis"))' "$cfg" >/dev/null 2>&1 || return 0
+  if [ ! -e "${cfg}.bak-cc-workarounds" ]; then
+    cp -p "$cfg" "${cfg}.bak-cc-workarounds" 2>/dev/null || true
+  fi
+  tmp="${cfg}.ccatis.$$"
+  if jq '.clientDataCacheSlots |= (if . then with_entries(select((.value.data.atis? // null) == null)) else . end)
+         | del(.clientDataCache.atis)' "$cfg" > "$tmp" 2>/dev/null \
+     && [ -s "$tmp" ]; then
+    mv -f "$tmp" "$cfg" 2>/dev/null || rm -f "$tmp" 2>/dev/null || true
+  else
+    rm -f "$tmp" 2>/dev/null || true
+  fi
+}
+
+_cc_atis_optout || true
 
 # --- Inject the thinking-display fix into the launch args -------------------
 #

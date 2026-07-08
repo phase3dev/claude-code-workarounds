@@ -259,8 +259,13 @@ current builds.)
 
 See the [README's 2026-07-07 update](README.md#2026-07-07-update-opus-48-and-the-experiment-header)
 for the verified two-step mitigation (purge the cached assignment, then launch
-with `DISABLE_GROWTHBOOK=1`) and its caveats. Server-side assignment can be
-widened, narrowed, or ended by Anthropic at any time without a client update.
+with `DISABLE_GROWTHBOOK=1`) and its caveats. The launcher can apply both steps
+on every launch via the opt-in `CC_ATIS_OPTOUT=1` toggle (off by default; same
+idempotent / one-time-backup / atomic-write / best-effort safety model as the
+bundle patches - the purge runs only when an assignment is actually cached, and
+a failed parse or write leaves `~/.claude.json` untouched). Server-side
+assignment can be widened, narrowed, or ended by Anthropic at any time without
+a client update.
 
 ### Status
 
