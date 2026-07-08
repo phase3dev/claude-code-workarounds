@@ -35,7 +35,7 @@ Terminal:
 | --- | --- | --- |
 | `CC_WORKAROUNDS` | `1` | Master switch. `0` disables every fix (argument injection and bundle patches) and reverts the webview to a clean bundle on launch. |
 | `CC_RECONCILE` | `1` | `0` = do not read or write the webview bundle this launch (emergency bypass). Argument injection still runs. |
-| `CC_THINKING_DISPLAY` | `summarized` | `summarized` shows extended-thinking summaries; `omitted` hides them (no injection). |
+| `CC_THINKING_DISPLAY` | `summarized` | `summarized` shows extended-thinking summaries; `omitted` hides them (no injection). **2026-07-07:** cannot override the server-side experiment that blanks Opus 4.8 summaries - see the [README 2026-07-07 update](../README.md#2026-07-07-update-opus-48-and-the-experiment-header). |
 | `CC_PATCH_CONTEXT_ICON` | `1` | `0` leaves the context-usage icon unpatched (and reverts ours on the next launch). |
 | `CC_PATCH_MD_COPY` | `1` | `0` leaves the webview without the markdown copy/export controls (and reverts ours on the next launch). |
 

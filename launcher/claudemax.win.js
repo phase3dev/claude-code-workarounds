@@ -6,6 +6,8 @@
 //      headless -p/SDK. Done by injecting `--thinking-display summarized` into
 //      the launch args (the one lever that is NOT interactivity-gated). Edits
 //      nothing.
+//      2026-07-07: cannot override the server-side experiment that blanks Opus
+//      4.8 summaries (x-cc-atis header); see the README's 2026-07-07 update.
 //   2. Restores the always-visible context-usage icon in the VS Code chat input.
 //      Recent extension builds (2.1.165+) hide that icon until you have used
 //      >50% of the context window; with the 1M window that is ~500k tokens, so it

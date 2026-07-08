@@ -3,6 +3,7 @@
 Full root-cause analysis and design notes behind the workarounds in the [README](README.md).
 
 * [Workaround 1: empty thinking summaries](#workaround-1-empty-thinking-summaries)
+  * [2026-07-07 update: server-side experiment blanks Opus 4.8 summaries](#2026-07-07-update-server-side-experiment-blanks-opus-48-summaries)
 * [Workaround 2: missing context-usage icon](#workaround-2-missing-context-usage-icon)
 
 Both fixes live in one launcher per platform (`launcher/claudemax` and `launcher/claudemax.win.js`), each fix independently switchable by an environment variable (see [`launcher/README.md`](launcher/README.md) for the toggle table). The node launcher compiles to a single `claudemax.exe` with `pkg` - one binary per platform carrying every fix, down from one exe per fix. The standalone per-fix tools under `fixes/` cover the non-launcher delivery paths.
@@ -19,7 +20,20 @@ The Messages API `thinking.display` field decides whether summarized thinking is
 
 There is no raw/full thinking mode: the only valid `display` values are `"summarized"` and `"omitted"`.
 
+> **2026-07-07:** a second, unrelated mechanism now exists that blanks Opus 4.8
+> summaries **even when the request carries `display: "summarized"`** - a
+> server-side experiment keyed on an `x-cc-atis` request header. The flag below
+> remains necessary-and-sufficient everywhere else, but cannot override that
+> experiment. See [the 2026-07-07 update](#2026-07-07-update-server-side-experiment-blanks-opus-48-summaries).
+
 ## Root cause (from the installed CLI)
+
+> **Historical note (added 2026-07-07):** the analysis in this section
+> describes builds up to `2.1.201`. As of extension `2.1.202` the extension
+> maps `showThinkingSummaries` into `--thinking-display` itself (the string
+> `"summarized"` now appears in `extension.js`), closing the client-side gap
+> below upstream. Kept for reference and for older builds; the launcher's
+> no-double-inject guard makes it a harmless no-op on fixed builds.
 
 The request builder inside the CLI picks `display` like this (function names from a native-installer 2.1.x binary; logic is the same across install types):
 
@@ -116,6 +130,8 @@ Toggle idea (untested): changing the line to `l.display || (process.env.CC_THINK
 ### Option 3: local proxy (design)
 
 > **Unmaintained and untested.** A design and a working starting point, not a turnkey fix; it sits in the path of your live auth token. The launcher (Option 1) is the supported fix.
+>
+> **2026-07-07:** on current builds, overriding `ANTHROPIC_BASE_URL` makes the CLI build a *different* request (it detects a non-first-party base URL), so this proxy is no longer a byte-faithful passthrough - see the [replication warning](#replication-warning-base-url-proxies-change-the-request).
 
 The most thorough fix: a small localhost forward proxy that injects the field at the wire level, so it is surface-agnostic (VS Code + CLI + SDK), needs no install edits, and survives updates. It works because every Claude Code surface resolves the API host as:
 
@@ -150,6 +166,109 @@ Status: provided as a working starting point but not extensively tested, so vali
 ## Compatibility
 
 Confirmed on Opus 4.7 / 4.8 with VS Code extension `2.1.169` (native-binary CLI), via the `claudeCode.claudeProcessWrapper` setting, on Windows 11 and Ubuntu 24.04; earlier confirmations were on `2.1.165` / `2.1.167` (which signaled thinking with `--thinking adaptive`). The CLI flag and the request field are stable levers, but the exact minified strings used by [`patch-extension.sh`](fixes/thinking-summaries/patch-extension.sh) (Option 2) can change between extension releases (e.g. the array variable `B` -> `q`); the script matches the variable generically and, if the surrounding pattern isn't found, skips and tells you to inspect manually. Options 1 and 3 don't depend on internal strings.
+
+**2026-07-07:** on `claude-opus-4-8` only, a server-side experiment can blank summaries regardless of the flag; see the next section. The flag remains correct and sufficient for other models and for installs not carrying the assignment.
+
+## 2026-07-07 update: server-side experiment blanks Opus 4.8 summaries
+
+A second, independent mechanism, discovered 2026-07-07 (times below are HST,
+UTC-10). It is unrelated to the client-side `display` gap above: here the
+request provably carries `display: "summarized"` and the server withholds the
+summary text anyway - on exactly one model.
+
+### Symptom and timeline
+
+* Same machine, same account, same CLI binary (`2.1.202` native): sessions
+  through 19:12 returned multi-thousand-character summaries on Opus 4.8;
+  the next session at 19:58 and everything after returned `thinking` strings of
+  length 0 with valid signatures. No client component changed in between
+  (`2.1.203`/`2.1.204` behave identically; version-chasing was a red herring).
+* Claude Code's feature-flag client (a remote-eval gating client refreshed at
+  session start and on a 6-hour timer) cached a new experiment assignment in
+  `~/.claude.json` at **19:12:18** - the exact break boundary:
+
+  ```json
+  "experimentKey": "claude_code_attic_parcel_experiment",
+  "atis": "attic-parcel-meridian"
+  ```
+
+### Mechanism (from the 2.1.204 native binary)
+
+The cached value is read back and attached as a request header on every
+first-party API call, in the CLI's shared fetch wrapper (all surfaces):
+
+```js
+Yvi = "x-cc-atis"
+function Xvi(){ let e = cL()?.atis; return typeof e === "string" && e.length > 0 ? e : void 0 }
+// fetch wrapper, first-party path:
+if (o) { let m = Xvi(); if (m !== void 0) a.set(Yvi, m) }
+// cL() reads clientDataCacheSlots / clientDataCache from ~/.claude.json
+```
+
+With `x-cc-atis: attic-parcel-meridian` present, the API returns Opus 4.8
+thinking blocks with a valid `signature` and an empty `thinking` string. The
+reasoning still runs and still consumes tokens; only the text is withheld.
+
+### Evidence (single-variable A/B, one binary `2.1.204`, one account, minutes apart)
+
+Request body in every run below carried `thinking: {type: "adaptive", display: "summarized"}`
+(wire-observed through a local forwarder that logged only the body's `model` +
+`thinking` fields and response thinking lengths - never headers):
+
+| Run | `x-cc-atis` on the wire | Opus 4.8 `thinking` length |
+| --- | --- | --- |
+| Direct, assignment cached | yes | **0** (sig present; repeated: sig 512/540/564/836) |
+| Identical request, header stripped in flight | no | **226** |
+| Assignment purged from config + `DISABLE_GROWTHBOOK=1`, direct-shape request | no (verified) | **65** |
+| `DISABLE_GROWTHBOOK=1` alone (cache not purged) | yes | **0** |
+
+Model scope, same flags, same account, direct path: Opus 4.7 -> 179 chars,
+Sonnet 5 -> 253, Haiku 4.5 -> 528, Fable 5 -> populated (VS Code path), Opus
+4.8 -> 0. All Opus 4.8 alias spellings (`opus`, `[1m]` variants) behave the
+same. Transport was ruled out (HTTP/1.1 and HTTP/2 upstream legs, and
+`accept-encoding` forwarded verbatim, all behave the same once the header is
+controlled for).
+
+### Why no launch flag or env var can override it
+
+* The flag path is intact: `--thinking-display summarized` still lands in the
+  request (`display` is wire-confirmed present). The server ignores it while
+  the header is present, so argument injection - this repo's Option 1 - cannot help.
+* On first-party auth the CLI hard-forces `thinking.type: "adaptive"` for
+  Opus 4.8 (capability-gated; the only override hook is a server-rejection
+  retry), and the `ANTHROPIC_*_SUPPORTED_CAPABILITIES` override envs are
+  disabled on first-party. There is no request shape the client can be
+  configured into that avoids the behavior.
+* `DISABLE_GROWTHBOOK=1` stops future refreshes but the already-cached value is
+  still read and sent (measured above), hence the two-step mitigation.
+
+### Replication warning: base-URL proxies change the request
+
+`ANTHROPIC_BASE_URL` pointing anywhere but `api.anthropic.com` flips an
+internal "first-party base URL" check, and the CLI then builds a *different*
+request: different system-prompt sections, no `x-client-request-id`, **no
+`x-cc-atis`**, and a separate feature-eval context that (currently) does not
+carry the assignment. A naive forwarding proxy therefore appears to "fix" Opus
+4.8 without doing anything - the client simply stopped sending the trigger. Set
+`_CLAUDE_CODE_ASSUME_FIRST_PARTY_BASE_URL=1` if you need the CLI to build the
+real first-party request shape through a local forwarder. (This also means
+Option 3 below is not the byte-faithful passthrough its design assumed on
+current builds.)
+
+### Mitigation
+
+See the [README's 2026-07-07 update](README.md#2026-07-07-update-opus-48-and-the-experiment-header)
+for the verified two-step mitigation (purge the cached assignment, then launch
+with `DISABLE_GROWTHBOOK=1`) and its caveats. Server-side assignment can be
+widened, narrowed, or ended by Anthropic at any time without a client update.
+
+### Status
+
+Undocumented: no CHANGELOG entry through `2.1.204`, no notice, no opt-in, no
+documented opt-out; the documented `showThinkingSummaries` setting is silently
+overridden while the assignment is active. Background:
+<https://github.com/anthropics/claude-code/issues/63358>. Dedicated upstream
+issue: pending (link will be added here once filed).
 
 ---
 

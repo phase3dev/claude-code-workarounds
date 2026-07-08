@@ -6,9 +6,17 @@ Not affiliated with or endorsed by Anthropic. A future Claude Code update could 
 
 ## Workarounds
 
-1. **Empty thinking summaries (Opus 4.7 / 4.8)** [updated 2026-06-10].
+1. **Empty thinking summaries (Opus 4.7 / 4.8)** [updated 2026-07-07].
    Thinking summaries render empty in the VS Code extension and headless `-p`/SDK paths, even with `showThinkingSummaries` enabled. Fix via the launcher (recommended), a one-line extension patch, or a local proxy.
    -> [details](#workaround-1-thinking-summaries)
+
+   > **2026-07-07 - new Opus 4.8 regression, upstream and server-side.** On
+   > `claude-opus-4-8` only, the API now returns an empty summary even when the
+   > request correctly asks for one, so the launcher's flag is no longer sufficient
+   > on that single model. It is gated on an experiment-assignment header the CLI
+   > sends. Every other model is unaffected and the launcher remains the fix for
+   > them. There is a mitigation.
+   > -> [2026-07-07 update](#2026-07-07-update-opus-48-and-the-experiment-header)
 
    <img alt="A populated Thinking summary in the VS Code chat instead of an empty block" src="media/thinking.png" style="max-width: 100%; height: auto;">
 
@@ -86,6 +94,91 @@ Extended-thinking summaries stopped appearing with Opus 4.7 and remain unavailab
 
 * <https://github.com/anthropics/claude-code/issues/49322>
 * <https://github.com/anthropics/claude-code/issues/63358>
+
+## 2026-07-07 update: Opus 4.8 and the experiment header
+
+**What changed.** On 2026-07-07 thinking summaries on `claude-opus-4-8` went
+from populated to empty mid-day with no client change involved: the same CLI
+binary produced multi-thousand-character summaries in one session and 0-char
+summaries in the next. The cause is server-side and request-provable. Claude
+Code's built-in feature-flag client cached a new experiment assignment in
+`~/.claude.json`:
+
+```json
+"experimentKey": "claude_code_attic_parcel_experiment",
+"atis": "attic-parcel-meridian"
+```
+
+The CLI attaches that value to every first-party API request as an `x-cc-atis`
+header. With the header present, the API returns Opus 4.8 thinking blocks with
+a valid `signature` and an **empty** `thinking` string - even when the request
+explicitly carries `thinking: {type: "adaptive", display: "summarized"}`.
+Strip the header (or purge the cached assignment) and the byte-identical
+request returns populated summaries. Full evidence and the single-variable
+A/B runs are in [TECHNICAL.md](TECHNICAL.md#2026-07-07-update-server-side-experiment-blanks-opus-48-summaries).
+
+**Scope.**
+
+* Affected model: `claude-opus-4-8` only (all alias spellings, with and without
+  `[1m]`). In the same test matrix, Opus 4.7, Sonnet 5, Haiku 4.5, and Fable 5
+  returned populated summaries.
+* Affected surfaces: all of them - the header is attached in the CLI's shared
+  fetch layer (verified on headless `-p` and the VS Code extension path; the
+  interactive TUI uses the same layer).
+* Affected installs: only those whose `~/.claude.json` carries the assignment.
+  No `atis` entry in the config means not enrolled (yet); assignment arrives
+  through the client's periodic remote feature refresh.
+
+**Effect on this repo's fix.** The launcher's `--thinking-display summarized`
+injection addresses the original, client-side gap and still does exactly that.
+It cannot help here: the request already asks for summaries correctly and the
+server withholds the text anyway. On Opus 4.8, with the assignment cached,
+summaries stay empty **with or without** the launcher. (Separately, extension
+`2.1.202`+ now maps `showThinkingSummaries` into the launch flags itself, so on
+current builds the launcher's thinking injection is a redundant no-op there;
+its no-double-inject guard makes that harmless, and the launcher's other fixes
+are unaffected.)
+
+**What to expect.** Populated summaries on every model except Opus 4.8; on
+Opus 4.8, empty "Thinking" sections whenever the assignment is cached. The
+reasoning still runs and still consumes tokens - only the human-readable text
+is withheld. Because assignment is remote and server-evaluated, Anthropic can
+widen, narrow, or end this at any time without any version changing on your
+machine.
+
+**Mitigation (verified 2026-07-07).** Two steps, both required - the env var
+alone is not enough (the cached value is still sent; measured), and the purge
+alone lasts only until the next feature refresh re-enrolls you:
+
+```sh
+# 0) Diagnose: is this install enrolled? (empty output = not enrolled)
+jq '.clientDataCacheSlots // {} | to_entries
+    | map(select(.value.data.atis != null) | .value.data | {experimentKey, atis})' \
+  ~/.claude.json
+
+# 1) Purge the cached assignment (backup first)
+cp ~/.claude.json ~/.claude.json.bak-cc-workarounds
+jq '.clientDataCacheSlots |= (if . then with_entries(select(.value.data.atis == null)) else . end)
+    | del(.clientDataCache.atis)' \
+  ~/.claude.json > ~/.claude.json.tmp && mv ~/.claude.json.tmp ~/.claude.json
+
+# 2) Prevent re-assignment on the next feature refresh
+export DISABLE_GROWTHBOOK=1   # set wherever Claude Code launches: shell profile,
+                              # or VS Code's claudeCode.environmentVariables
+```
+
+Then reload the VS Code window. Caveats: `DISABLE_GROWTHBOOK=1` opts the
+install out of Claude Code's client-side feature gating entirely (no other side
+effects observed so far, but they are possible); on Windows the file is
+`%USERPROFILE%\.claude.json` - if `jq` is unavailable, hand-edit the slot
+entries containing `"atis"` out of `clientDataCacheSlots`.
+
+**Status.** Undocumented upstream: no CHANGELOG entry through `2.1.204`
+mentions it, and there was no notice, no opt-in, and no documented opt-out. The
+documented `showThinkingSummaries` setting is silently overridden while the
+assignment is active. Background thread:
+<https://github.com/anthropics/claude-code/issues/63358>. Dedicated upstream
+issue for this finding: pending (link will be added here once filed).
 
 There are technically three workarounds; only the launcher is maintained:
 
@@ -295,6 +388,7 @@ Setup is otherwise identical to Option 1. This is unrelated to the fixes above.
 
 ## Troubleshooting
 
+* Summaries suddenly empty again, but only on Opus 4.8 (since 2026-07-07): the launcher is not broken and neither is your setup - your install is likely enrolled in a server-side experiment that blanks Opus 4.8 summaries at the API. No launch flag can override it. Diagnose and mitigate per the [2026-07-07 update](#2026-07-07-update-opus-48-and-the-experiment-header).
 * Thinking still empty after setup: Reload the VS Code window after changing the setting. Confirm the setting points to the launcher's full absolute path. On Windows, confirm the path uses double backslashes.
 * Context icon still missing after setup: It may take two reloads the first time (see the first-run note above). Confirm `CC_PATCH_CONTEXT_ICON` is not set to `0` and `CC_WORKAROUNDS` is not set to `0`.
 * `could not find the real 'claude' binary`: Set `CLAUDE_REAL_BIN` to its full path. Use `which claude` on Linux/macOS or `where claude` on Windows.
@@ -336,7 +430,7 @@ pkg launcher/claudemax.win.js --targets node18-win-x64 --output claudemax.exe
 
 Confirmed on Opus 4.7 and Opus 4.8 with VS Code extension builds `2.1.169` through `2.1.172` (native-binary CLI), via the `claudeCode.claudeProcessWrapper` setting, on Windows 11 and Ubuntu 24.04.
 
-* **Thinking fix:** earlier builds (`2.1.165` / `2.1.167`) signaled thinking with `--thinking adaptive`; `2.1.169` and later use `--max-thinking-tokens` on the VS Code path. The launcher keys off either, plus `-p`/`--print` for headless. The `--thinking-display` flag and the request field are stable levers; the Option 2 minified strings can change between releases (the script matches generically and skips if not found).
+* **Thinking fix:** earlier builds (`2.1.165` / `2.1.167`) signaled thinking with `--thinking adaptive`; `2.1.169` and later use `--max-thinking-tokens` on the VS Code path. The launcher keys off either, plus `-p`/`--print` for headless. The `--thinking-display` flag and the request field are stable levers; the Option 2 minified strings can change between releases (the script matches generically and skips if not found). **2026-07-07:** extension `2.1.202`+ maps `showThinkingSummaries` into the launch flags itself (the launcher's injection becomes a harmless no-op there), and on `claude-opus-4-8` a server-side experiment can blank summaries regardless of the flag - see the [2026-07-07 update](#2026-07-07-update-opus-48-and-the-experiment-header). The flag remains correct and sufficient for other models and for un-enrolled installs.
 * **Context-icon fix:** the `>50% used` gate has been observed with different minified names (`Z/U` in `2.1.108` and `2.1.131`, `t/c` in `2.1.170` and `2.1.172`). The patch matches the guard-pair shape with variable-name captures and records the matched names in its ownership marker, so it patches and reverts cleanly regardless of the names; if a future build changes the guard shape itself, the launcher safely no-ops and the anchor needs updating.
 * **Markdown copy/export fix:** the copy controls are appended to the webview bundle and re-applied each launch. The injection is anchored on stable structural markers and skips cleanly if the bundle shape changes.
 
