@@ -60,7 +60,7 @@ Toggles (set in the environment where Claude Code launches, then reload):
 | `CC_THINKING_DISPLAY` | `summarized` | `summarized` shows extended-thinking summaries; `omitted` hides them (no injection). |
 | `CC_PATCH_CONTEXT_ICON` | `1` | `0` leaves the context-usage icon unpatched (and reverts ours on the next launch). |
 | `CC_PATCH_MD_COPY` | `1` | `0` leaves the webview without the markdown copy/export controls (and reverts ours on the next launch). |
-| `CC_ATIS_OPTOUT` | `0` | `1` opts out of the server-side experiment that blanks Opus 4.8 thinking summaries: purges the cached `x-cc-atis` assignment from `~/.claude.json` (one-time backup, atomic write, idempotent) and launches with `DISABLE_GROWTHBOOK=1`. **Off by default** - it edits the CLI's config file and disables ALL client-side feature gating; see the [2026-07-07 update](#2026-07-07-update-opus-48-and-the-experiment-header). |
+| `CC_ATIS_OPTOUT` | `0` | `1` opts out of the server-side experiment that blanks Opus 4.8 thinking summaries: purges the cached `x-cc-atis` assignment from `~/.claude.json` (one-time backup, atomic write, idempotent) and launches with `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1` (2026-07-08 correction - `DISABLE_GROWTHBOOK` alone no longer prevents re-enrollment). **Off by default** - it edits the CLI's config file and restricts the CLI to essential traffic (also disables claude.ai Projects sync, DesignSync, `/feedback`, live preview, and telemetry; local sessions are unaffected); see the [2026-07-07 update](#2026-07-07-update-opus-48-and-the-experiment-header). |
 
 See [`launcher/README.md`](launcher/README.md) for wiring details, the VS Code env-setting how-to, and the build command.
 
@@ -164,14 +164,18 @@ jq '.clientDataCacheSlots |= (if . then with_entries(select(.value.data.atis == 
     | del(.clientDataCache.atis)' \
   ~/.claude.json > ~/.claude.json.tmp && mv ~/.claude.json.tmp ~/.claude.json
 
-# 2) Prevent re-assignment on the next feature refresh
-export DISABLE_GROWTHBOOK=1   # set wherever Claude Code launches: shell profile,
-                              # or VS Code's claudeCode.environmentVariables
+# 2) Prevent re-assignment (2026-07-08 correction: DISABLE_GROWTHBOOK no longer
+#    works - the assignment arrives via the CLI's startup bootstrap fetch, which
+#    only the essential-traffic-only switch blocks; measured)
+export CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1
+# set wherever Claude Code launches: shell profile, ~/.claude/settings.json "env",
+# or VS Code's claudeCode.environmentVariables
 ```
 
-Then reload the VS Code window. Caveats: `DISABLE_GROWTHBOOK=1` opts the
-install out of Claude Code's client-side feature gating entirely (no other side
-effects observed so far, but they are possible); on Windows the file is
+Then reload the VS Code window. Caveats: `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1`
+restricts the CLI to essential traffic entirely - it also disables claude.ai
+Projects sync, DesignSync, `/feedback`, `--enable-live-preview`, and telemetry
+(local sessions, transcripts, and resume are unaffected); on Windows the file is
 `%USERPROFILE%\.claude.json` - if `jq` is unavailable, hand-edit the slot
 entries containing `"atis"` out of `clientDataCacheSlots`.
 
@@ -181,22 +185,34 @@ Code's `claudeCode.environmentVariables`, or your shell profile). When enabled
 it purges any cached assignment (idempotent - no rewrite when nothing is
 cached; one-time backup to `~/.claude.json.bak-cc-workarounds`; atomic
 temp-then-rename write; best-effort, never blocks the launch) and sets
-`DISABLE_GROWTHBOOK=1` for the launched process, so a refresh that re-enrolls
-you between launches is undone on the next launch. It is **off by default**,
-unlike the launcher's other fixes, because it is not free: it edits the CLI's
-own config file, and the env var disables Claude Code's client-side feature
-gating entirely, not just this experiment - enable it deliberately. The bash
-launcher needs `jq` for the purge half (without it, it warns and only sets the
-env var, which is NOT sufficient while an assignment is already cached); the
-Windows launcher has no external dependency. The manual recipe above remains
-for non-launcher users.
+`CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1` for the launched process, so the
+CLI cannot re-enroll itself. It is **off by default**, unlike the launcher's
+other fixes, because it is not free: it edits the CLI's own config file, and
+the env var restricts the CLI to essential traffic entirely (the caveats above)
+- enable it deliberately. The bash launcher needs `jq` for the purge half
+(without it, it warns and only sets the env vars, which is NOT sufficient while
+an assignment is already cached); the Windows launcher has no external
+dependency. The manual recipe above remains for non-launcher users.
+
+**2026-07-08 correction.** The originally published second step
+(`DISABLE_GROWTHBOOK=1`) stopped working within a day: with the cache purged
+and that variable set, the CLI **re-fetched and re-cached the assignment about
+one second after launch** and Opus 4.8 summaries stayed empty (`thinking` length
+0). The assignment is delivered by the CLI's startup **bootstrap data fetch**
+("[Bootstrap] Cache updated, persisting to disk" in the 2.1.204 binary), which
+ignores `DISABLE_GROWTHBOOK`; the re-fetched slot also carries a new payload
+field (`convolute_arcades`), so the experiment is actively evolving server-side.
+Re-measured single-variable: purge + `DISABLE_GROWTHBOOK=1` -> re-enrolled,
+len 0; purge + `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1` -> no re-enrollment,
+len 169/234/populated. The launcher's `CC_ATIS_OPTOUT=1` now sets the working
+variable (and keeps `DISABLE_GROWTHBOOK` as harmless defense in depth).
 
 **Status.** Undocumented upstream: no CHANGELOG entry through `2.1.204`
 mentions it, and there was no notice, no opt-in, and no documented opt-out. The
 documented `showThinkingSummaries` setting is silently overridden while the
 assignment is active. Background thread:
 <https://github.com/anthropics/claude-code/issues/63358>. Dedicated upstream
-issue for this finding: pending (link will be added here once filed).
+issue for this finding: <https://github.com/anthropics/claude-code/issues/75607>.
 
 There are technically three workarounds; only the launcher is maintained:
 

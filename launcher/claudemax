@@ -52,7 +52,7 @@
 #   export CC_RECONCILE=0                   # do not touch the webview bundle   (1)
 #   export CC_SCRUB_ROUTING=1               # force the default Anthropic account (0)
 #   export CC_ATIS_OPTOUT=1                 # purge cached x-cc-atis experiment
-#                                           # assignment + DISABLE_GROWTHBOOK=1 (0)
+#                                           # assignment + essential-traffic-only env (0)
 #
 # The real `claude` must be installed. This wrapper finds it automatically; if it
 # cannot, set CLAUDE_REAL_BIN to the full path of your real claude binary.
@@ -186,28 +186,33 @@ fi
 # server-side experiment that blanks Opus 4.8 thinking summaries (README
 # "2026-07-07 update"):
 #   1. purge any cached x-cc-atis experiment assignment from ~/.claude.json, and
-#   2. launch with DISABLE_GROWTHBOOK=1 so the next remote feature refresh
-#      cannot re-enroll this install.
+#   2. launch with CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1 so the CLI cannot
+#      re-enroll this install. (2026-07-08 correction: DISABLE_GROWTHBOOK=1 does
+#      NOT stop re-enrollment - the assignment arrives via the CLI's startup
+#      bootstrap fetch, which only the essential-traffic-only switch blocks;
+#      measured. DISABLE_GROWTHBOOK stays exported as harmless defense in depth.)
 # Both halves are required - the env var alone still sends the already-cached
 # token, and the purge alone lasts only until the next refresh (both measured).
 #
 # OFF by default, unlike the other fixes, because it is not free: it edits the
-# CLI's own config file, and DISABLE_GROWTHBOOK=1 opts the install out of Claude
-# Code's client-side feature gating ENTIRELY, not just this experiment. Enable
-# it deliberately.
+# CLI's own config file, and CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1 restricts
+# the CLI to essential traffic ENTIRELY - it also disables claude.ai Projects
+# sync, DesignSync, /feedback, --enable-live-preview, and telemetry (local
+# sessions, transcripts, and resume are unaffected). Enable it deliberately.
 #
 # Safety model matches the bundle patches: idempotent (no rewrite when nothing
 # is cached), one-time backup (~/.claude.json.bak-cc-workarounds, only if
 # absent), atomic temp+mv write (jq exits non-zero on malformed input, so a bad
 # parse never replaces the file), best-effort (never blocks the launch). The
-# purge half needs jq; without it the launcher warns and still sets
-# DISABLE_GROWTHBOOK=1 (an already-cached assignment is still sent until purged
-# by hand - see the README's manual recipe).
+# purge half needs jq; without it the launcher warns and still sets the env
+# vars (an already-cached assignment is still sent until purged by hand - see
+# the README's manual recipe).
 CC_ATIS_OPTOUT="${CC_ATIS_OPTOUT:-0}"
 
 _cc_atis_optout() {
   [ "$CC_WORKAROUNDS" != "0" ] || return 0
   [ "$CC_ATIS_OPTOUT" != "0" ] || return 0
+  export CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1
   export DISABLE_GROWTHBOOK=1
   local cfg="$HOME/.claude.json" tmp
   [ -f "$cfg" ] && [ -r "$cfg" ] || return 0

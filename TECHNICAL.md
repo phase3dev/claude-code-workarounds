@@ -239,8 +239,14 @@ controlled for).
   retry), and the `ANTHROPIC_*_SUPPORTED_CAPABILITIES` override envs are
   disabled on first-party. There is no request shape the client can be
   configured into that avoids the behavior.
-* `DISABLE_GROWTHBOOK=1` stops future refreshes but the already-cached value is
-  still read and sent (measured above), hence the two-step mitigation.
+* `DISABLE_GROWTHBOOK=1` never blocks the header attach (the cached value is
+  still read and sent; measured above) - and as of **2026-07-08 it does not stop
+  re-enrollment either**: the assignment arrives via the CLI's startup bootstrap
+  fetch, which ignores that variable (purge + `DISABLE_GROWTHBOOK=1` was
+  re-enrolled ~1s after launch; the re-fetched slot carries a new
+  `convolute_arcades` payload field). Only
+  `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1` blocks the fetch (measured:
+  purge + that switch -> no re-enrollment, populated summaries).
 
 ### Replication warning: base-URL proxies change the request
 
@@ -259,8 +265,10 @@ current builds.)
 
 See the [README's 2026-07-07 update](README.md#2026-07-07-update-opus-48-and-the-experiment-header)
 for the verified two-step mitigation (purge the cached assignment, then launch
-with `DISABLE_GROWTHBOOK=1`) and its caveats. The launcher can apply both steps
-on every launch via the opt-in `CC_ATIS_OPTOUT=1` toggle (off by default; same
+with `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1` - the 2026-07-08 correction;
+`DISABLE_GROWTHBOOK` no longer prevents re-enrollment) and its caveats. The
+launcher can apply both steps on every launch via the opt-in `CC_ATIS_OPTOUT=1`
+toggle (off by default; same
 idempotent / one-time-backup / atomic-write / best-effort safety model as the
 bundle patches - the purge runs only when an assignment is actually cached, and
 a failed parse or write leaves `~/.claude.json` untouched). Server-side
@@ -273,7 +281,7 @@ Undocumented: no CHANGELOG entry through `2.1.204`, no notice, no opt-in, no
 documented opt-out; the documented `showThinkingSummaries` setting is silently
 overridden while the assignment is active. Background:
 <https://github.com/anthropics/claude-code/issues/63358>. Dedicated upstream
-issue: pending (link will be added here once filed).
+issue: <https://github.com/anthropics/claude-code/issues/75607>.
 
 ---
 

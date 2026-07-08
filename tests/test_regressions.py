@@ -332,8 +332,9 @@ class LauncherRegressionTests(unittest.TestCase):
                 "#!/usr/bin/env bash\n"
                 "python3 - <<'PY'\n"
                 "import json, os\n"
-                "open(os.environ['CAPTURE_ENV'], 'w').write(\n"
-                "    json.dumps({'DISABLE_GROWTHBOOK': os.environ.get('DISABLE_GROWTHBOOK')}))\n"
+                "open(os.environ['CAPTURE_ENV'], 'w').write(json.dumps(\n"
+                "    {k: os.environ.get(k) for k in\n"
+                "     ('DISABLE_GROWTHBOOK', 'CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC')}))\n"
                 "PY\n",
                 encoding="utf-8",
             )
@@ -348,9 +349,10 @@ class LauncherRegressionTests(unittest.TestCase):
                 "CC_RECONCILE": "0",   # do not read or write any bundle this launch
                 "CLAUDE_REAL_BIN": str(fake),
                 "CAPTURE_ENV": str(capture),
-                # Pinned so a host env that already exports DISABLE_GROWTHBOOK
+                # Pinned so a host env that already exports the mitigation vars
                 # (e.g. this mitigation applied locally) cannot skew the test.
                 "DISABLE_GROWTHBOOK": "",
+                "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "",
             }
             launcher = str(REPO / "launcher" / "claudemax")
 
@@ -361,7 +363,8 @@ class LauncherRegressionTests(unittest.TestCase):
             self.assertFalse(backup.exists())
             self.assertEqual(
                 json.loads(capture.read_text(encoding="utf-8")),
-                {"DISABLE_GROWTHBOOK": ""},
+                {"DISABLE_GROWTHBOOK": "",
+                 "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": ""},
             )
 
             # Enabled: atis slots + cache key purged, everything else kept, the
@@ -372,7 +375,8 @@ class LauncherRegressionTests(unittest.TestCase):
             self.assertEqual(backup.read_text(encoding="utf-8"), original)
             self.assertEqual(
                 json.loads(capture.read_text(encoding="utf-8")),
-                {"DISABLE_GROWTHBOOK": "1"},
+                {"DISABLE_GROWTHBOOK": "1",
+                 "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1"},
             )
 
             # Idempotent: a second enabled run does not rewrite the purged file.
@@ -389,10 +393,10 @@ class LauncherRegressionTests(unittest.TestCase):
             cli = temp / "cli.js"
             cli.write_text(
                 "const fs = require('fs');\n"
-                "fs.writeFileSync(process.env.CAPTURE_ENV, JSON.stringify({\n"
-                "  DISABLE_GROWTHBOOK: ('DISABLE_GROWTHBOOK' in process.env)\n"
-                "    ? process.env.DISABLE_GROWTHBOOK : null,\n"
-                "}));\n",
+                "const keys = ['DISABLE_GROWTHBOOK', 'CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC'];\n"
+                "const out = {};\n"
+                "for (const k of keys) out[k] = (k in process.env) ? process.env[k] : null;\n"
+                "fs.writeFileSync(process.env.CAPTURE_ENV, JSON.stringify(out));\n",
                 encoding="utf-8",
             )
             shim = make_fake_cmd_shim(td, cli)
@@ -407,9 +411,10 @@ class LauncherRegressionTests(unittest.TestCase):
                 "CC_RECONCILE": "0",
                 "CLAUDE_REAL_BIN": str(shim),
                 "CAPTURE_ENV": str(capture),
-                # Pinned so a host env that already exports DISABLE_GROWTHBOOK
+                # Pinned so a host env that already exports the mitigation vars
                 # (e.g. this mitigation applied locally) cannot skew the test.
                 "DISABLE_GROWTHBOOK": "",
+                "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "",
             }
             launcher = str(REPO / "launcher" / "claudemax.win.js")
 
@@ -419,7 +424,8 @@ class LauncherRegressionTests(unittest.TestCase):
             self.assertFalse(backup.exists())
             self.assertEqual(
                 json.loads(capture.read_text(encoding="utf-8")),
-                {"DISABLE_GROWTHBOOK": ""},
+                {"DISABLE_GROWTHBOOK": "",
+                 "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": ""},
             )
 
             res = run(["node", launcher], env={**base, "CC_ATIS_OPTOUT": "1"})
@@ -428,7 +434,8 @@ class LauncherRegressionTests(unittest.TestCase):
             self.assertEqual(backup.read_text(encoding="utf-8"), original)
             self.assertEqual(
                 json.loads(capture.read_text(encoding="utf-8")),
-                {"DISABLE_GROWTHBOOK": "1"},
+                {"DISABLE_GROWTHBOOK": "1",
+                 "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1"},
             )
 
             before = cfg.stat().st_mtime_ns

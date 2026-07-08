@@ -53,7 +53,7 @@
 //   set CC_RECONCILE=0                 do not touch the webview bundle (default: 1)
 //   set CC_SCRUB_ROUTING=1             force the default Anthropic account (default: 0)
 //   set CC_ATIS_OPTOUT=1               purge cached x-cc-atis experiment assignment
-//                                      + DISABLE_GROWTHBOOK=1 (default: 0)
+//                                      + essential-traffic-only env (default: 0)
 //
 // The real `claude` must be installed. This wrapper finds it automatically
 // (native install `claude.exe` or npm `claude.cmd`); if it cannot, set the
@@ -559,15 +559,20 @@ if (process.env.CC_SCRUB_ROUTING && process.env.CC_SCRUB_ROUTING !== "0") {
 // server-side experiment that blanks Opus 4.8 thinking summaries (README
 // "2026-07-07 update"): purge any cached x-cc-atis experiment assignment from
 // the CLI config (%USERPROFILE%\.claude.json) and launch with
-// DISABLE_GROWTHBOOK=1 so the next remote feature refresh cannot re-enroll this
-// install. Both halves are required - the env var alone still sends the
-// already-cached token, and the purge alone lasts only until the next refresh
-// (both measured).
+// CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1 so the CLI cannot re-enroll this
+// install. (2026-07-08 correction: DISABLE_GROWTHBOOK=1 does NOT stop
+// re-enrollment - the assignment arrives via the CLI's startup bootstrap fetch,
+// which only the essential-traffic-only switch blocks; measured. It stays set
+// as harmless defense in depth.) Both halves are required - the env var alone
+// still sends the already-cached token, and the purge alone lasts only until
+// the next fetch (both measured).
 //
 // OFF by default, unlike the other fixes, because it is not free: it edits the
-// CLI's own config file, and DISABLE_GROWTHBOOK=1 opts the install out of
-// Claude Code's client-side feature gating ENTIRELY, not just this experiment.
-// Enable it deliberately.
+// CLI's own config file, and CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1
+// restricts the CLI to essential traffic ENTIRELY - it also disables claude.ai
+// Projects sync, DesignSync, /feedback, --enable-live-preview, and telemetry
+// (local sessions, transcripts, and resume are unaffected). Enable it
+// deliberately.
 //
 // Safety model matches the bundle patches: idempotent (no rewrite when nothing
 // is cached), one-time backup (.claude.json.bak-cc-workarounds, only if
@@ -577,6 +582,7 @@ function atisOptout() {
   try {
     if (process.env.CC_WORKAROUNDS === "0") return;
     if (!process.env.CC_ATIS_OPTOUT || process.env.CC_ATIS_OPTOUT === "0") return;
+    process.env.CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC = "1";
     process.env.DISABLE_GROWTHBOOK = "1";
     const home = process.env.USERPROFILE || process.env.HOME || "";
     if (!home) return;
