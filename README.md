@@ -21,9 +21,17 @@ Not affiliated with or endorsed by Anthropic. A future Claude Code update could 
 
    <img alt="A populated Thinking summary in the VS Code chat instead of an empty block" src="media/thinking.png" style="max-width: 100%; height: auto;">
 
-2. **Missing context-usage icon (1M context window)** [updated 2026-06-10].
+2. **Missing context-usage icon (1M context window)** [updated 2026-11-16].
    The context-usage pie in the chat input is hidden until you have used more than 50% of the context window. With the 1M window that is about 500,000 tokens, so it is effectively never shown. Fix via the launcher (re-patches the webview on each launch), or a standalone patcher script.
    -> [details](#workaround-2-context-usage-icon)
+
+   > **2026-11-16 - icon hidden again on extension `2.1.326`.** That build
+   > restructured the indicator component, so launchers and patchers from before
+   > this date no longer recognize the code they patch. They skip it safely, and
+   > the icon stays hidden. The 50% threshold itself is unchanged, and the current
+   > launcher and patcher handle both the old and the new code. Update your copy,
+   > then reload the window.
+   > -> [2026-11-16 update](#2026-11-16-update-extension-21326)
 
    <img alt="The context-usage icon and tooltip in the VS Code chat input, showing 51 percent context used and 49 percent remaining until auto-compact" src="media/context-icon.png" style="max-width: 100%; height: auto;">
 
@@ -317,7 +325,7 @@ maintained; the launcher is the supported fix.
 
 # Workaround 2: context-usage icon
 
-The context-usage indicator (the small pie in the chat input that shows how full the context window is) disappeared for many users on recent extension builds. It is not actually removed: recent builds (around 2.1.165 and later) gate the indicator so it renders **only after you have used more than 50% of the context window**. With the 1M context window enabled, 50% is roughly 500,000 tokens, so in normal use the icon is effectively never shown.
+The context-usage indicator (the small pie in the chat input that shows how full the context window is) disappeared for many users starting around extension `2.1.165`. It is not actually removed: since then the extension gates the indicator so it renders **only after you have used more than 50% of the context window**. With the 1M context window enabled, 50% is roughly 500,000 tokens, so in normal use the icon is effectively never shown.
 
 The `CLAUDE_CODE_DISABLE_1M_CONTEXT=1` workaround that circulates in issue threads is not a real fix: it only shrinks the window so 50% is reached sooner, at the cost of giving up the 1M window, and it does not touch the threshold. This workaround addresses the threshold directly.
 
@@ -325,6 +333,22 @@ Related GitHub issue threads (feature requests for a persistent context indicato
 
 * <https://github.com/anthropics/claude-code/issues/18456>
 * <https://github.com/anthropics/claude-code/issues/66021>
+
+## 2026-11-16 update: extension 2.1.326
+
+**What changed.** Extension `2.1.326` split the indicator into a gate component and a render component, and moved its popover into a shared tooltip. The two hide guards became the gate's own early return, so the guard pair now ends in `;` instead of `}`. The 50% threshold is unchanged.
+
+**Effect on older copies.** Launchers and `fix-context-icon.py` from before this date only recognize the `}` ending. On `2.1.326` they find no match and skip the patch, as designed, so the icon is hidden again. When this happens, both launchers print a `claudemax: context-icon anchor not found ... skipping` warning.
+
+**What to do.** Update to the current versions. They accept either ending and write it back unchanged, so undo still restores the original bytes.
+
+* **Linux / macOS:** copy the current [`launcher/claudemax`](launcher/claudemax) over your installed copy (`cp launcher/claudemax ~/.local/bin/claudemax`).
+* **Windows:** replace `claudemax.exe` with a build from [Releases](../../releases) dated 2026-11-16 or later, or [build it](#building-the-exe) from the current `claudemax.win.js`. Windows locks a running `.exe`, so close VS Code before replacing it.
+* **Standalone patcher:** re-run the current [`fix-context-icon.py`](fixes/context-icon/fix-context-icon.py).
+
+Then reload the window. The first launch after updating may need two reloads (see the first-run note below).
+
+**Verified** against the real `2.1.195` and `2.1.261` bundles (old ending) and the `2.1.326` bundle (new ending). The bash launcher and `fix-context-icon.py` apply the patch and undo it back to the original bytes on all three, and the Windows launcher patches a live `2.1.326` install.
 
 There is no environment variable or CLI flag for this threshold, so the fix is a tiny edit to the extension's webview bundle. There are two ways to apply it.
 
@@ -344,7 +368,7 @@ In the indicator component, the render gates are `if (t === 0) return null` and 
 if(t===0)return null;if(c>=50)return null}   ->   if(c>=101)return null}/*ccwa-context-icon:t:c*/
 ```
 
-Extension `2.1.326` split the component in two and made the guard its own early return, so the pair now ends in `;` instead of `}`. The threshold is unchanged. The launcher matches either ending and keeps it:
+From `2.1.326` on, the pair ends in `;` instead of `}` (see the [2026-11-16 update](#2026-11-16-update-extension-21326)). The launcher matches either ending and keeps it:
 
 ```text
 if(t===0)return null;if(r>=50)return null;   ->   if(r>=101)return null;/*ccwa-context-icon:t:r*/
@@ -431,6 +455,7 @@ Setup is otherwise identical to Option 1. This is unrelated to the fixes above.
 * Summaries suddenly empty again, but only on Opus 4.8 (since 2026-07-07): the launcher is not broken and neither is your setup - your install is likely enrolled in a server-side experiment that blanks Opus 4.8 summaries at the API. No launch flag can override it. Diagnose and mitigate per the [2026-07-07 update](#2026-07-07-update-opus-48-and-the-experiment-header), or set `CC_ATIS_OPTOUT=1` in the launcher environment to apply the mitigation automatically (off by default; read the caveats there first).
 * Thinking still empty after setup: Reload the VS Code window after changing the setting. Confirm the setting points to the launcher's full absolute path. On Windows, confirm the path uses double backslashes.
 * Context icon still missing after setup: It may take two reloads the first time (see the first-run note above). Confirm `CC_PATCH_CONTEXT_ICON` is not set to `0` and `CC_WORKAROUNDS` is not set to `0`.
+* Context icon gone again after an extension update, with the launcher still set up: the update probably changed the code the patch looks for, and the launcher skipped it rather than guess (it logs `context-icon anchor not found`). Update the launcher, then reload. For `2.1.326`, see the [2026-11-16 update](#2026-11-16-update-extension-21326). If the current launcher also skips it, that build needs a new anchor; check this repo for an update.
 * `could not find the real 'claude' binary`: Set `CLAUDE_REAL_BIN` to its full path. Use `which claude` on Linux/macOS or `where claude` on Windows.
 * Nothing changes in a plain terminal chat: This is expected. The interactive TUI already shows summaries and the context icon, and does not need these fixes.
 * Summaries are short: Summary length tracks the reasoning effort level. Try a higher `CLAUDE_CODE_EFFORT_LEVEL`, such as `xhigh`, or enable auto mode with `CLAUDE_CODE_ENABLE_AUTO_MODE=1`. Higher effort uses more tokens.
@@ -468,10 +493,10 @@ pkg launcher/claudemax.win.js --targets node18-win-x64 --output claudemax.exe
 
 ## Compatibility
 
-Confirmed on Opus 4.7 and Opus 4.8 with VS Code extension builds `2.1.169` through `2.1.172` (native-binary CLI), via the `claudeCode.claudeProcessWrapper` setting, on Windows 11 and Ubuntu 24.04.
+Originally confirmed on Opus 4.7 and Opus 4.8 with VS Code extension builds `2.1.169` through `2.1.172` (native-binary CLI), via the `claudeCode.claudeProcessWrapper` setting, on Windows 11 and Ubuntu 24.04. Later checks are dated in each bullet below; the most recent is the context-icon fix on `2.1.326` (2026-11-16).
 
 * **Thinking fix:** earlier builds (`2.1.165` / `2.1.167`) signaled thinking with `--thinking adaptive`; `2.1.169` and later use `--max-thinking-tokens` on the VS Code path. The launcher keys off either, plus `-p`/`--print` for headless. The `--thinking-display` flag and the request field are stable levers; the Option 2 minified strings can change between releases (the script matches generically and skips if not found). **2026-07-07:** extension `2.1.202`+ maps `showThinkingSummaries` into the launch flags itself (the launcher's injection becomes a harmless no-op there), and on `claude-opus-4-8` a server-side experiment can blank summaries regardless of the flag - see the [2026-07-07 update](#2026-07-07-update-opus-48-and-the-experiment-header). The flag remains correct and sufficient for other models and for un-enrolled installs.
-* **Context-icon fix:** the `>50% used` gate has been observed with different minified names (`Z/U` in `2.1.108` and `2.1.131`, `t/c` in `2.1.170` and `2.1.172`). The patch matches the guard-pair shape with variable-name captures and records the matched names in its ownership marker, so it patches and reverts cleanly regardless of the names; if a future build changes the guard shape itself, the launcher safely no-ops and the anchor needs updating. **2026-11-16:** `2.1.326` changed the guard's ending from `}` to `;` (the component was split and the popover moved to a shared tooltip), which made older launchers skip the patch and the icon disappear again. The launcher, the bash launcher, and `fix-context-icon.py` now accept both endings; verified against the real `2.1.261` and `2.1.326` bundles.
+* **Context-icon fix:** the `>50% used` gate has been observed with different minified names (`Z/U` in `2.1.108` and `2.1.131`, `t/c` in `2.1.170`, `2.1.172` and `2.1.195`, `J/U` in `2.1.261`, `t/r` in `2.1.326`). The patch matches the guard-pair shape with variable-name captures and records the matched names in its ownership marker, so it patches and reverts cleanly regardless of the names; if a future build changes the guard shape itself, the launcher safely no-ops and the anchor needs updating. **2026-11-16:** `2.1.326` changed the guard's ending from `}` to `;` (the component was split and the popover moved to a shared tooltip), which made older launchers skip the patch and the icon disappear again. The Windows launcher, the bash launcher, and `fix-context-icon.py` now accept both endings; verified against the real `2.1.195`, `2.1.261` and `2.1.326` bundles. See the [2026-11-16 update](#2026-11-16-update-extension-21326).
 * **Markdown copy/export fix:** the copy controls are appended to the webview bundle and re-applied each launch. The injection is anchored on stable structural markers and skips cleanly if the bundle shape changes.
 
 Behavior may change in future Claude Code releases.

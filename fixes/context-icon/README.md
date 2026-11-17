@@ -9,6 +9,10 @@ effectively never shown. This fix removes the startup hide guard and flips the
 threshold so the icon renders at any usage level, including the reload gap before
 fresh usage data arrives.
 
+Extension 2.1.326 (2026-11-16) changed how the guard ends, so copies of this
+script from before that date skip 2.1.326 bundles and the icon stays hidden. The
+current script handles both the old and the new ending.
+
 ## Standalone usage
 
 ```
@@ -31,7 +35,7 @@ launcher reverts our edit on the next launch.
 ## Maintenance Contract
 
 - Anchors / selectors: `if(<id>===0)return null;if(<id>>=50)return null` followed
-  by `}` (through 2.1.32x) or `;` (2.1.326+, where the guard became the gate
+  by `}` (observed through 2.1.261) or `;` (2.1.326+, where the guard became the gate
   component's own early return), in `webview/index.js`. The identifier names and
   the terminator are captured, not hardcoded; the terminator is written back
   unchanged.

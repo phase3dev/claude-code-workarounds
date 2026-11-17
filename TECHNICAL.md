@@ -308,7 +308,7 @@ function FJe({usedTokens:e, contextWindow:t, onCompact:i, buttonClassName:n}) {
 }
 ```
 
-`c` is the percent of context *remaining*, so `c >= 50` hides the icon whenever at least half the window is free, i.e. it only appears once more than 50% is used. With a 1M window that is 500k tokens. The same guard shape is present in the locally inspected `2.1.131` (`Z/U`) and `2.1.170` (`t/c`) bundles, with different minified names.
+`c` is the percent of context *remaining*, so `c >= 50` hides the icon whenever at least half the window is free, i.e. it only appears once more than 50% is used. With a 1M window that is 500k tokens. The same guard shape is present in the locally inspected `2.1.131` (`Z/U`), `2.1.170` and `2.1.195` (`t/c`), and `2.1.261` (`J/U`) bundles, with different minified names. `2.1.326` (`t/r`) keeps it but ends the pair in `;` instead of `}` (see the fix below).
 
 The `CLAUDE_CODE_DISABLE_1M_CONTEXT=1` env var that circulates in the issue threads only shrinks the window to 200k so 50% (100k) is reached sooner. It does not touch the threshold and forces giving up the 1M window, so it is not a real fix.
 
@@ -408,4 +408,4 @@ The pie button's `onClick` is `onCompact`: clicking the icon triggers compaction
 
 ## Compatibility
 
-Confirmed on VS Code extension `2.1.169` (native-binary CLI) on Windows 11 and Ubuntu 24.04. The same guard shape has been observed with different minified names (`Z/U` in `2.1.131`, `t/c` in `2.1.170`). The patch keys off that shape, not the minified component name or exact variable names; if a future build changes the shape, the launcher safely no-ops (the icon goes missing again) until the anchor is updated. The standalone [`fix-context-icon.py`](fixes/context-icon/fix-context-icon.py) applies the same change directly and supports `--revert`.
+Originally confirmed on VS Code extension `2.1.169` (native-binary CLI) on Windows 11 and Ubuntu 24.04. The same guard shape has been observed with different minified names (`Z/U` in `2.1.131`, `t/c` in `2.1.170` and `2.1.195`, `J/U` in `2.1.261`). **2026-11-16:** `2.1.326` (`t/r`) ends the guard pair in `;` instead of `}`, which made older launchers skip the patch and the icon disappear again; the anchor now captures either ending and writes it back unchanged. Verified against the real `2.1.195`, `2.1.261` and `2.1.326` bundles. The patch keys off that shape, not the minified component name or exact variable names; if a future build changes the shape, the launcher safely no-ops (the icon goes missing again) until the anchor is updated. The standalone [`fix-context-icon.py`](fixes/context-icon/fix-context-icon.py) applies the same change directly and supports `--revert`.
