@@ -331,16 +331,22 @@ fi
 # on macOS/BSD) and an atomic `mv -f`; a failed step leaves the original
 # untouched.
 #
-# context-icon feature - component `FJe` in webview/index.js:
-#   if(t===0)return null;if(c>=50)return null}
+# context-icon feature - the context-usage component in webview/index.js. The
+# guard pair has had two minified shapes:
+#   <=2.1.32x (inside an if-block):  if(t===0)return null;if(c>=50)return null}
 #     -> if(c>=101)return null}/*ccwa-context-icon:t:c*/
-# `c` is "% of context remaining" (maxes at 100), so >=101 never fires. Removing
-# the t===0 guard keeps the icon visible across a reload gap; it may briefly show
-# 0% until the webview receives fresh usage data. The trailing
+#   2.1.326+ (component's own early return):
+#                                    if(t===0)return null;if(r>=50)return null;
+#     -> if(r>=101)return null;/*ccwa-context-icon:t:r*/
+# The second variable is "% of context remaining" (maxes at 100), so >=101 never
+# fires. Removing the ===0 guard keeps the icon visible across a reload gap; it
+# may briefly show 0% until the webview receives fresh usage data. The trailing
 # /*ccwa-context-icon:<first-var>:<remaining-var>*/ is our ownership marker.
 # Maintenance: this keys off the minified guard pair shape above, not the
-# component name or exact minified variable names; if a future build changes that
-# shape, apply no-ops loudly (a one-line warning) until the anchor here is updated.
+# component name or exact minified variable names, and keeps whichever
+# terminator ("}" or ";") it matched so undo restores the exact bytes; if a
+# future build changes that shape, apply no-ops loudly (a one-line warning)
+# until the anchor here is updated.
 
 # A bundle feature is enabled when the master switch is on AND its own toggle is
 # on. CC_WORKAROUNDS=0 forces every feature off, so reconcile reverts to clean.
@@ -358,14 +364,14 @@ _cc_feature_enabled() {
 _cc_apply_context_icon() {
   local f="$1" tmp count
   if grep -q '/\*ccwa-context-icon' "$f" 2>/dev/null; then return 0; fi   # already marked
-  count="$( (grep -E -o 'if\([A-Za-z_$][A-Za-z0-9_$]*===0\)return null;if\([A-Za-z_$][A-Za-z0-9_$]*>=50\)return null\}' "$f" 2>/dev/null || true) | wc -l | tr -d ' ')"
+  count="$( (grep -E -o 'if\([A-Za-z_$][A-Za-z0-9_$]*===0\)return null;if\([A-Za-z_$][A-Za-z0-9_$]*>=50\)return null[};]' "$f" 2>/dev/null || true) | wc -l | tr -d ' ')"
   if [ "$count" = "0" ]; then
     echo "claudemax: context-icon anchor not found in $f (extension changed?); skipping" >&2
     return 0
   fi
   if [ "$count" != "1" ]; then return 0; fi   # ambiguous (version changed) - skip
   tmp="${f}.ccapply.$$"
-  if sed 's#if(\([A-Za-z_$][A-Za-z0-9_$]*\)===0)return null;if(\([A-Za-z_$][A-Za-z0-9_$]*\)>=50)return null}#if(\2>=101)return null}/*ccwa-context-icon:\1:\2*/#' "$f" > "$tmp" 2>/dev/null \
+  if sed 's#if(\([A-Za-z_$][A-Za-z0-9_$]*\)===0)return null;if(\([A-Za-z_$][A-Za-z0-9_$]*\)>=50)return null\([};]\)#if(\2>=101)return null\3/*ccwa-context-icon:\1:\2*/#' "$f" > "$tmp" 2>/dev/null \
      && [ -s "$tmp" ] && grep -q '/\*ccwa-context-icon' "$tmp" 2>/dev/null; then
     cat "$tmp" > "$f" 2>/dev/null || true
   fi
@@ -393,7 +399,7 @@ _cc_undo_context_icon() {
     || grep -qF '/*ccwa-context-icon' "$f" 2>/dev/null \
     || return 0
   tmp="${f}.ccundo.$$"
-  if sed -e 's#if(\([A-Za-z_$][A-Za-z0-9_$]*\)>=101)return null}/\*ccwa-context-icon:\([A-Za-z_$][A-Za-z0-9_$]*\):\1\*/#if(\2===0)return null;if(\1>=50)return null}#g' \
+  if sed -e 's#if(\([A-Za-z_$][A-Za-z0-9_$]*\)>=101)return null\([};]\)/\*ccwa-context-icon:\([A-Za-z_$][A-Za-z0-9_$]*\):\1\*/#if(\3===0)return null;if(\1>=50)return null\2#g' \
          -e 's#if(\([A-Za-z_$][A-Za-z0-9_$]*\)===0)return null;if(\([A-Za-z_$][A-Za-z0-9_$]*\)>=101)return null}/\*ccwa-context-icon\*/#if(\1===0)return null;if(\2>=50)return null}#g' \
          -e 's#if(c>=101)return null}/\*ccwa-context-icon\*/#if(t===0)return null;if(c>=50)return null}#g' \
          -e 's#if(t===0)return null;if(c>=101)return null}#if(t===0)return null;if(c>=50)return null}#g' \

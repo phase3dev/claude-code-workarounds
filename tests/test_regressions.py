@@ -548,6 +548,25 @@ class PatcherRegressionTests(unittest.TestCase):
             self.assertEqual(backup.read_text(encoding="utf-8"), f"before {ALT_OLD_ICON} after")
             self.assertEqual(mod.patch_file(str(target)), "already-patched")
 
+    def test_fix_context_icon_patches_semicolon_terminated_guard_2_1_326(self):
+        # 2.1.326 ends the guard pair in ";" (component early return), not "}".
+        spec = importlib.util.spec_from_file_location(
+            "fix_context_icon", REPO / "fixes" / "context-icon" / "fix-context-icon.py"
+        )
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        old = "if(t===0)return null;if(r>=50)return null;return m(UBn,{})"
+        new = "if(r>=101)return null;/*ccwa-context-icon:t:r*/return m(UBn,{})"
+
+        with tempfile.TemporaryDirectory() as td:
+            target = pathlib.Path(td) / "index.js"
+            target.write_text(f"before {old} after", encoding="utf-8")
+
+            self.assertEqual(mod.patch_file(str(target)), "PATCHED")
+            self.assertEqual(target.read_text(encoding="utf-8"), f"before {new} after")
+            self.assertEqual(mod.patch_file(str(target)), "already-patched")
+            self.assertEqual(mod.undo_known_patches(f"before {new} after"), f"before {old} after")
+
     def test_fix_context_icon_upgrades_renamed_bare_marked_patch(self):
         # A bundle left by an older var-agnostic patcher carries a BARE
         # (metadata-less) marker on non-t/c guard vars. undo_known_patches must

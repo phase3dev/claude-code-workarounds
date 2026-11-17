@@ -30,11 +30,13 @@ launcher reverts our edit on the next launch.
 
 ## Maintenance Contract
 
-- Anchors / selectors: `if(<id>===0)return null;if(<id>>=50)return null}`
-  (component `FJe` in `webview/index.js`). The identifier names are captured, not
-  hardcoded.
+- Anchors / selectors: `if(<id>===0)return null;if(<id>>=50)return null` followed
+  by `}` (through 2.1.32x) or `;` (2.1.326+, where the guard became the gate
+  component's own early return), in `webview/index.js`. The identifier names and
+  the terminator are captured, not hardcoded; the terminator is written back
+  unchanged.
 - Ownership marker: `/*ccwa-context-icon:<first-var>:<remaining-var>*/`. Apply
-  rewrites the combined guard to `if(<remaining-var>>=101)return null}<marker>`;
+  rewrites the combined guard to `if(<remaining-var>>=101)return null<terminator><marker>`;
   undo uses the marker metadata to restore the pristine combined guard with the
   same variable names. Older `/*ccwa-context-icon*/` markers are recognized as
   legacy fingerprints.

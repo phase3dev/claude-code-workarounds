@@ -24,6 +24,15 @@ self-corrects when fresh usage data arrives.
     if(t===0)return null;if(c>=50)return null}
         -> if(c>=101)return null}/*ccwa-context-icon:t:c*/   (marked; c maxes at 100)
 
+Extension 2.1.326 made the guard the component's own early return, so the pair
+now ends in ";" instead of "}" (same threshold):
+
+    if(t===0)return null;if(r>=50)return null;
+        -> if(r>=101)return null;/*ccwa-context-icon:t:r*/
+
+Both shapes are matched, and the matched terminator is kept so undo restores
+the exact original bytes.
+
 The minified variable names are not stable across builds; the patcher matches the
 guard shape with any ASCII JS identifier pair and stores the matched names in the
 marker so undo can restore the same pristine names.
@@ -60,9 +69,11 @@ import sys
 import tempfile
 
 IDENT = r"[A-Za-z_$][A-Za-z0-9_$]*"
-OLD_RE = re.compile(rf"if\(({IDENT})===0\)return null;if\(({IDENT})>=50\)return null\}}")
+# Group 3 / group 2 capture the terminator: "}" (<=2.1.32x) or ";" (2.1.326+).
+OLD_RE = re.compile(rf"if\(({IDENT})===0\)return null;if\(({IDENT})>=50\)return null([}};])")
+# Groups: 1 = remaining var, 2 = terminator, 3 = first var.
 MARKED_RE = re.compile(
-    rf"if\(({IDENT})>=101\)return null\}}/\*ccwa-context-icon:({IDENT}):\1\*/"
+    rf"if\(({IDENT})>=101\)return null([}};])/\*ccwa-context-icon:({IDENT}):\1\*/"
 )
 # Legacy bare (metadata-less) marker on arbitrary guard names: an older
 # var-agnostic write could leave the both-guards >=101 form + bare marker on a
@@ -81,19 +92,19 @@ LEGACY_BARE = "if(t===0)return null;if(c>=101)return null}"
 BACKUP_SUFFIX = ".bak-context-icon"
 
 
-def old_guard(first_var, remaining_var):
-    return f"if({first_var}===0)return null;if({remaining_var}>=50)return null}}"
+def old_guard(first_var, remaining_var, end="}"):
+    return f"if({first_var}===0)return null;if({remaining_var}>=50)return null{end}"
 
 
-def marked_guard(first_var, remaining_var):
+def marked_guard(first_var, remaining_var, end="}"):
     return (
-        f"if({remaining_var}>=101)return null}}"
+        f"if({remaining_var}>=101)return null{end}"
         f"/*ccwa-context-icon:{first_var}:{remaining_var}*/"
     )
 
 
 def undo_known_patches(data):
-    data = MARKED_RE.sub(lambda m: old_guard(m.group(2), m.group(1)), data)
+    data = MARKED_RE.sub(lambda m: old_guard(m.group(3), m.group(1), m.group(2)), data)
     data = LEGACY_NEW_RE.sub(lambda m: old_guard(m.group(1), m.group(2)), data)
     data = (
         data.replace(NEW_LEGACY, OLD)
@@ -159,7 +170,7 @@ def patch_file(path):
     if n > 1:
         return f"ambiguous ({n} matches) — skipped for safety"
     match = matches[0]
-    patched = data[: match.start()] + marked_guard(match.group(1), match.group(2)) + data[match.end() :]
+    patched = data[: match.start()] + marked_guard(match.group(1), match.group(2), match.group(3)) + data[match.end() :]
     backup = path + BACKUP_SUFFIX
     if not os.path.exists(backup):
         with open(backup, "w", encoding="utf-8", newline="") as b:

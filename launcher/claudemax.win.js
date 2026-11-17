@@ -239,27 +239,34 @@ if (!claude) {
 
 // --- Restore the always-visible context-usage icon (patches the webview) ----
 //
-// Idempotent edit to component `FJe` in the extension's webview/index.js:
-//   if(t===0)return null;if(c>=50)return null}
+// Idempotent edit to the context-usage component in the extension's
+// webview/index.js. The guard pair has had two minified shapes:
+//   <=2.1.32x (inside an if-block):  if(t===0)return null;if(c>=50)return null}
 //     -> if(c>=101)return null}/*ccwa-context-icon:t:c*/
-// `c` is "% of context remaining"; it maxes at 100, so >=101 never fires. Removing
-// the t===0 guard keeps the icon visible across a reload gap; it may briefly show
-// 0% until the webview receives fresh usage data. Best-effort: every step is
-// wrapped so it can never block the launch; a one-time backup is made and the
-// write goes through a temp + rename so a failed write leaves the original
-// untouched. Re-applied each launch, so an extension update that reinstalls a
-// fresh bundle is re-patched next launch.
+//   2.1.326+ (component's own early return, popover moved to a shared tooltip):
+//                                    if(t===0)return null;if(r>=50)return null;
+//     -> if(r>=101)return null;/*ccwa-context-icon:t:r*/
+// The second variable is "% of context remaining"; it maxes at 100, so >=101
+// never fires. Removing the ===0 guard keeps the icon visible across a reload
+// gap; it may briefly show 0% until the webview receives fresh usage data.
+// Best-effort: every step is wrapped so it can never block the launch; a
+// one-time backup is made and the write goes through a temp + rename so a failed
+// write leaves the original untouched. Re-applied each launch, so an extension
+// update that reinstalls a fresh bundle is re-patched next launch.
 //
 // Maintenance note: this keys off the minified guard pair shape below, not the
-// component name or exact minified variable names. If a future build changes that
-// shape, the routine safely no-ops until the anchor here is updated.
+// component name or exact minified variable names, and accepts either
+// terminator ("}" or ";"), which is preserved so undo restores the exact bytes.
+// If a future build changes that shape, the routine safely no-ops (and logs
+// "context-icon anchor not found") until the anchor here is updated.
 const ICON_IDENT = "[A-Za-z_$][A-Za-z0-9_$]*";
 const ICON_OLD_RE = new RegExp(
-  "if\\((" + ICON_IDENT + ")===0\\)return null;if\\((" + ICON_IDENT + ")>=50\\)return null\\}",
+  "if\\((" + ICON_IDENT + ")===0\\)return null;if\\((" + ICON_IDENT + ")>=50\\)return null([};])",
   "g"
 );
+// Groups: 1 = remaining var, 2 = terminator, 3 = first var (must match \1 order).
 const ICON_MARKED_RE = new RegExp(
-  "if\\((" + ICON_IDENT + ")>=101\\)return null\\}/\\*ccwa-context-icon:(" +
+  "if\\((" + ICON_IDENT + ")>=101\\)return null([};])/\\*ccwa-context-icon:(" +
     ICON_IDENT +
     "):\\1\\*/",
   "g"
@@ -282,12 +289,12 @@ const ICON_LEGACY_NEW_RE = new RegExp(
   "g"
 );
 
-function iconOld(firstVar, remainingVar) {
-  return `if(${firstVar}===0)return null;if(${remainingVar}>=50)return null}`;
+function iconOld(firstVar, remainingVar, end = "}") {
+  return `if(${firstVar}===0)return null;if(${remainingVar}>=50)return null${end}`;
 }
 
-function iconNew(firstVar, remainingVar) {
-  return `if(${remainingVar}>=101)return null}/*ccwa-context-icon:${firstVar}:${remainingVar}*/`;
+function iconNew(firstVar, remainingVar, end = "}") {
+  return `if(${remainingVar}>=101)return null${end}/*ccwa-context-icon:${firstVar}:${remainingVar}*/`;
 }
 
 // Bundle-patch feature registry. Each feature is idempotent (apply/undo are
@@ -311,8 +318,8 @@ function applyContextIcon(data) {
     return base;
   }
   if (n !== 1) return base; // ambiguous (version changed) - skip
-  return base.replace(ICON_OLD_RE, (_, firstVar, remainingVar) =>
-    iconNew(firstVar, remainingVar)
+  return base.replace(ICON_OLD_RE, (_, firstVar, remainingVar, end) =>
+    iconNew(firstVar, remainingVar, end)
   );
 }
 
@@ -322,8 +329,8 @@ function undoContextIcon(data) {
   // versions wrote with fixed t/c names. Marked forms must go first because bare
   // strings are prefixes of marked strings.
   return data
-    .replace(ICON_MARKED_RE, (_, remainingVar, firstVar) =>
-      iconOld(firstVar, remainingVar)
+    .replace(ICON_MARKED_RE, (_, remainingVar, end, firstVar) =>
+      iconOld(firstVar, remainingVar, end)
     )
     .replace(ICON_LEGACY_NEW_RE, (_, firstVar, remainingVar) =>
       iconOld(firstVar, remainingVar)

@@ -344,7 +344,13 @@ In the indicator component, the render gates are `if (t === 0) return null` and 
 if(t===0)return null;if(c>=50)return null}   ->   if(c>=101)return null}/*ccwa-context-icon:t:c*/
 ```
 
-`c` maxes at 100, so `c >= 101` is never true and the gate never hides the icon. Removing `if (t === 0) return null` keeps the icon visible after a window reload while usage data is still being repopulated; during that gap it can briefly show `0%`. The edit is anchored on the minified guard-pair shape above, not on the component name or exact minified variable names, which change between builds. The trailing `/*ccwa-context-icon:<first-var>:<remaining-var>*/` marker stores the matched names so the launcher can reverse only its own change back to the same pristine variable names.
+Extension `2.1.326` split the component in two and made the guard its own early return, so the pair now ends in `;` instead of `}`. The threshold is unchanged. The launcher matches either ending and keeps it:
+
+```text
+if(t===0)return null;if(r>=50)return null;   ->   if(r>=101)return null;/*ccwa-context-icon:t:r*/
+```
+
+`c` (or `r`) maxes at 100, so `>= 101` is never true and the gate never hides the icon. Removing `if (t === 0) return null` keeps the icon visible after a window reload while usage data is still being repopulated; during that gap it can briefly show `0%`. The edit is anchored on the minified guard-pair shape above, not on the component name or exact minified variable names, which change between builds. The trailing `/*ccwa-context-icon:<first-var>:<remaining-var>*/` marker stores the matched names so the launcher can reverse only its own change back to the same pristine variable names.
 
 ### Turn the context-icon fix on or off
 
@@ -465,7 +471,7 @@ pkg launcher/claudemax.win.js --targets node18-win-x64 --output claudemax.exe
 Confirmed on Opus 4.7 and Opus 4.8 with VS Code extension builds `2.1.169` through `2.1.172` (native-binary CLI), via the `claudeCode.claudeProcessWrapper` setting, on Windows 11 and Ubuntu 24.04.
 
 * **Thinking fix:** earlier builds (`2.1.165` / `2.1.167`) signaled thinking with `--thinking adaptive`; `2.1.169` and later use `--max-thinking-tokens` on the VS Code path. The launcher keys off either, plus `-p`/`--print` for headless. The `--thinking-display` flag and the request field are stable levers; the Option 2 minified strings can change between releases (the script matches generically and skips if not found). **2026-07-07:** extension `2.1.202`+ maps `showThinkingSummaries` into the launch flags itself (the launcher's injection becomes a harmless no-op there), and on `claude-opus-4-8` a server-side experiment can blank summaries regardless of the flag - see the [2026-07-07 update](#2026-07-07-update-opus-48-and-the-experiment-header). The flag remains correct and sufficient for other models and for un-enrolled installs.
-* **Context-icon fix:** the `>50% used` gate has been observed with different minified names (`Z/U` in `2.1.108` and `2.1.131`, `t/c` in `2.1.170` and `2.1.172`). The patch matches the guard-pair shape with variable-name captures and records the matched names in its ownership marker, so it patches and reverts cleanly regardless of the names; if a future build changes the guard shape itself, the launcher safely no-ops and the anchor needs updating.
+* **Context-icon fix:** the `>50% used` gate has been observed with different minified names (`Z/U` in `2.1.108` and `2.1.131`, `t/c` in `2.1.170` and `2.1.172`). The patch matches the guard-pair shape with variable-name captures and records the matched names in its ownership marker, so it patches and reverts cleanly regardless of the names; if a future build changes the guard shape itself, the launcher safely no-ops and the anchor needs updating. **2026-11-16:** `2.1.326` changed the guard's ending from `}` to `;` (the component was split and the popover moved to a shared tooltip), which made older launchers skip the patch and the icon disappear again. The launcher, the bash launcher, and `fix-context-icon.py` now accept both endings; verified against the real `2.1.261` and `2.1.326` bundles.
 * **Markdown copy/export fix:** the copy controls are appended to the webview bundle and re-applied each launch. The injection is anchored on stable structural markers and skips cleanly if the bundle shape changes.
 
 Behavior may change in future Claude Code releases.

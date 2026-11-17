@@ -45,6 +45,11 @@ ALT_WEDGED = ALT_OLD + LEGACY_MARKER
 # renamed var, with NO marker and NO ===0 prefix. We never write this, so undo must
 # leave it untouched (ownership invariant), never rewrite it to >=50.
 UNOWNED_BARE101 = "if(U>=101)return null}"
+# 2.1.326 made the guard the component's own early return, so the pair ends in
+# ";" instead of "}" (same threshold). apply must keep the ";" and undo must
+# restore it byte-for-byte.
+SEMI_OLD = "if(t===0)return null;if(r>=50)return null;return m(UBn,{})"
+SEMI_MARKED = "if(r>=101)return null;/*ccwa-context-icon:t:r*/return m(UBn,{})"
 BAK = ".bak-cc-workarounds"
 MD_OPEN = "/* cc-md-copy v1 */"
 MD_CLOSE = "/* /cc-md-copy v1 */"
@@ -147,6 +152,27 @@ class ReconcileMixin:
             self.assertEqual(res.returncode, 0, res.stderr)
             self.assertEqual(idx.read_text(encoding="utf-8"), f"before {ALT_OLD} after")
             self.assertNotIn("anchor not found", res.stderr)
+
+    def test_apply_accepts_semicolon_terminated_guard_2_1_326(self):
+        with tempfile.TemporaryDirectory() as td:
+            home = pathlib.Path(td)
+            idx = make_extension(home, f"before {SEMI_OLD} after")
+            res = self._run(td, home)
+            self.assertEqual(res.returncode, 0, res.stderr)
+            self.assertEqual(idx.read_text(encoding="utf-8"), f"before {SEMI_MARKED} after")
+            self.assertNotIn("anchor not found", res.stderr)
+            bak = idx.with_name(idx.name + BAK)
+            self.assertEqual(bak.read_text(encoding="utf-8"), f"before {SEMI_OLD} after")
+            self.assertEqual(self._run(td, home).returncode, 0)
+            self.assertEqual(idx.read_text(encoding="utf-8"), f"before {SEMI_MARKED} after")
+
+    def test_disabling_feature_restores_semicolon_terminated_guard(self):
+        with tempfile.TemporaryDirectory() as td:
+            home = pathlib.Path(td)
+            idx = make_extension(home, f"before {SEMI_MARKED} after")
+            res = self._run(td, home, env_extra={"CC_PATCH_CONTEXT_ICON": "0"})
+            self.assertEqual(res.returncode, 0, res.stderr)
+            self.assertEqual(idx.read_text(encoding="utf-8"), f"before {SEMI_OLD} after")
 
     def test_master_switch_reverts_all_and_injects_nothing(self):
         with tempfile.TemporaryDirectory() as td:
